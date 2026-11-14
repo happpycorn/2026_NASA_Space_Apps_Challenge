@@ -4,7 +4,7 @@ import {
   connectFirestoreEmulator, doc, getDocFromServer, getFirestore, onSnapshot, runTransaction,
 } from 'firebase/firestore'
 import { proposals, type Department } from '../missions/cubesat'
-import type { MultiplayerRemedy } from '../game/mission'
+import type { MultiplayerRemedy } from '../missions/cubesat'
 import { emulatorHost, firebaseConfig, multiplayerAvailable, useEmulators } from './config'
 import { codeAlphabet, hasPlayerProposal, newRoom, proposalFor, roleFor, validCode, type Room } from './model'
 

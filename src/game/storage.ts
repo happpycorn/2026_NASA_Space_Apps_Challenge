@@ -1,7 +1,7 @@
-import type { Game } from './mission'
-import { cubeSat } from '../missions/cubesat'
+import type { Game } from './types'
+import { missionRules } from '../missions/rules'
 
-const key = 'space-mission.single.v1'
+const key = 'space-mission.single.v2'
 const stages = ['feasibility', 'design', 'build', 'integration', 'review', 'flight', 'results']
 
 export function readLocal(key: string) {
@@ -22,12 +22,14 @@ export function readGame(): Game | null {
   const raw = readLocal(key)
   if (!raw) return null
   try {
-    const game: Game = JSON.parse(raw)
-    if (game.missionId !== cubeSat.id || !stages.includes(game.stage) || !Array.isArray(game.log)
-      || !Number.isInteger(game.week) || game.week < 0 || game.week > cubeSat.deadline
+    const game: Game | null = JSON.parse(raw)
+    if (!game) return null
+    const mission = missionRules[game.missionId]
+    if (!mission || !stages.includes(game.stage) || !Array.isArray(game.log) || !Array.isArray(game.events) || !Array.isArray(game.records)
+      || !Number.isInteger(game.deadline) || !Number.isInteger(game.week) || game.week < 0
       || !Number.isInteger(game.credits) || game.credits < 0
-      || !Object.hasOwn(cubeSat.payloads, game.design.payload) || !Object.hasOwn(cubeSat.supplies, game.design.supply)
-      || !Object.hasOwn(cubeSat.schedules, game.design.schedule) || !Object.hasOwn(cubeSat.radios, game.design.radio)) return null
+      || (game.event !== null && !mission.events?.some(event => event.id === game.event))
+      || !Object.entries(mission.groups).every(([group, { options }]) => Object.hasOwn(options, game.design?.[group]))) return null
     return game
   } catch {
     return null

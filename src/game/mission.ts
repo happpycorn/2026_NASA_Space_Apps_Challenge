@@ -1,135 +1,50 @@
-import { cubeSat as mission } from '../missions/cubesat'
+import { missionCatalog, missionRules } from '../missions/rules'
+import type { Action, Cost, Design, Evidence, FlightResult, Game, MissionRules, Stop, TestResult, Work } from './types'
 
-export type Design = {
-  payload: keyof typeof mission.payloads
-  supply: keyof typeof mission.supplies
-  schedule: keyof typeof mission.schedules
-  radio: keyof typeof mission.radios
+export type * from './types'
+
+export function rulesFor(game: Pick<Game, 'missionId'>): MissionRules {
+  return missionRules[game.missionId]
 }
 
-export const initialDesign: Design = mission.initialDesign
-export const reviewDesign: Design = mission.reviewDesign
-export const remedies = ['stagger', 'basic', 'reinforced', 'compliant'] as const
-export type Remedy = typeof remedies[number]
-export const multiplayerRemedies = ['stagger', 'basic', 'reinforced'] as const
-export type MultiplayerRemedy = typeof multiplayerRemedies[number]
-export type Cost = { weeks: number; credits: number }
-export type Stage = 'feasibility' | 'design' | 'build' | 'integration' | 'review' | 'flight' | 'results'
-export type Gate = 'MDR' | 'PDR' | 'CDR' | 'FRR'
-
-export function forecast(design: Design) {
-  const payload = mission.payloads[design.payload]
-  const supply = mission.supplies[design.supply]
-  const schedule = mission.schedules[design.schedule]
-  const radio = mission.radios[design.radio]
-  const combined = mission.busWatts + payload.watts + mission.downlinkWatts
-  const separate = mission.busWatts + Math.max(payload.watts, mission.downlinkWatts)
-  const peak = design.schedule === 'overlap' ? combined : separate
-  const capacity = Math.min(mission.groundCapacity, radio.groundCapacity)
-  return {
-    payloadWatts: payload.watts, peak, available: supply.watts, deficit: Math.max(0, peak - supply.watts),
-    contactCapacity: capacity,
-    batches: Math.max(0, Math.min(payload.batches - schedule.batchLoss, capacity)),
-  }
-}
-
-export function testDesign(design: Design) {
-  const designForecast = forecast(design)
-  const firstTx = mission.radios[design.radio].firstTxMinutes
-  const ditl = {
-    separation: mission.ditl.separationMinutes,
-    deploy: mission.ditl.deployMinutes,
-    firstTx,
-    elapsed: firstTx - mission.ditl.separationMinutes,
-    threshold: mission.ditl.minQuietMinutes,
-  }
-  const testedBatches = designForecast.deficit ? 0 : designForecast.batches
-  return {
-    design, ...designForecast, ditl, testedBatches,
-    powerPass: designForecast.deficit === 0,
-    ditlPass: ditl.elapsed >= ditl.threshold,
-    dataPass: testedBatches >= mission.minimumBatches,
-  }
-}
-
-type Evidence = ReturnType<typeof testDesign> & { week: number; revision: number }
-export function passes(evidence: ReturnType<typeof testDesign>) {
-  return evidence.powerPass && evidence.ditlPass && evidence.dataPass
-}
-
-export function applyRemedy(design: Design, remedy: Remedy): Design {
-  switch (remedy) {
-    case 'stagger': return { ...design, schedule: 'stagger' }
-    case 'basic': return { ...design, payload: 'basic', schedule: 'overlap' }
-    case 'reinforced': return { ...design, supply: 'reinforced', schedule: 'overlap' }
-    case 'compliant': return { ...design, radio: 'compliant' }
-  }
-}
-
-export function resolveTeamReview(remedy: MultiplayerRemedy) {
-  const correction = mission.costs[remedy]
-  const retest = mission.costs.integrate
-  return {
-    evidence: testDesign(applyRemedy(reviewDesign, remedy)),
-    weeks: correction.weeks + retest.weeks,
-    credits: correction.credits + retest.credits,
-  }
+export function passes(evidence: Pick<TestResult, 'checks'>) {
+  return evidence.checks.every(Boolean)
 }
 
 const stageWork = { feasibility: 'assess', design: 'freeze', build: 'build', integration: 'integrate' } as const
-const workOrder = Object.values(stageWork)
-type Work = keyof typeof mission.costs
-type LogId = Work | 'return' | 'approve' | 'operate' | 'analysisClear' | 'analysisConflict'
-export type Entry = { id: LogId; week: number; cost: number; design: Design; report?: Evidence }
-type Analysis = { design: Design; forecast: ReturnType<typeof forecast> }
-export type FlightChoice = 'priority' | 'extra' | 'diagnostics'
-export type Flight = { choice: FlightChoice; batches: number; diagnostics?: number; stretch: boolean; firstTx: number }
-type Stop = 'deadline' | 'funds' | 'cancelled'
+const workOrder: Work[] = Object.values(stageWork)
 
-export type Game = {
-  missionId: typeof mission.id
-  stage: Stage
-  week: number
-  credits: number
-  design: Design
-  revision: number
-  gate: Gate
-  analysis: Analysis | null
-  evidence: Evidence | null
-  flight: Flight | null
-  stop: Stop | null
-  returned: boolean
-  log: Entry[]
-}
-
-export type Action =
-  | { type: 'configure'; design: Design }
-  | { type: 'work' | 'analyze' | 'review' | 'wait' | 'cancel' }
-  | { type: 'repair'; remedy: Remedy }
-  | { type: 'fly'; choice: FlightChoice }
-
-export function newGame(): Game {
+export function newGame(missionId: string = missionCatalog[0].id, records: string[] = []): Game {
+  const mission = missionRules[missionId]
   return {
-    missionId: mission.id, stage: 'feasibility', week: 0, credits: mission.budget, design: initialDesign,
-    revision: 0, gate: 'MDR', analysis: null, evidence: null, flight: null, stop: null, returned: false, log: [],
+    missionId, stage: 'feasibility', week: 0, deadline: mission.deadline, credits: mission.budget, design: mission.initialDesign,
+    revision: 0, gate: 'MDR', analysis: null, evidence: null, flight: null, stop: null, returned: false,
+    event: null, events: [], records, log: [],
   }
 }
 
 export function availableWeeks(game: Game) {
-  return mission.deadline - game.week
+  return game.deadline - game.week
 }
 
 export function affordable(game: Game, cost: Cost) {
   return availableWeeks(game) >= cost.weeks && game.credits >= cost.credits
 }
 
+function optionCost(mission: MissionRules, design: Design) {
+  return Object.entries(mission.groups).reduce((total, [key, group]) => total + (group.options[design[key]]?.cost ?? 0), 0)
+}
+
+function cheapestFreeze(mission: MissionRules) {
+  return Object.values(mission.groups).reduce(
+    (total, group) => total + Math.min(...Object.values(group.options).map(option => option.cost ?? 0)), mission.costs.freeze.credits)
+}
+
 export function workCost(game: Game, work: Work): Cost {
+  const mission = rulesFor(game)
   const cost = mission.costs[work]
   if (work !== 'freeze') return cost
-  return {
-    ...cost,
-    credits: cost.credits + mission.payloads[game.design.payload].cost + mission.supplies[game.design.supply].cost,
-  }
+  return { ...cost, credits: cost.credits + optionCost(mission, game.design) }
 }
 
 export function currentWork(game: Game) {
@@ -147,7 +62,7 @@ export function canConfigure(game: Game) {
 }
 
 export function sameDesign(a: Design, b: Design) {
-  return a.payload === b.payload && a.supply === b.supply && a.schedule === b.schedule && a.radio === b.radio
+  return Object.keys({ ...a, ...b }).every(key => a[key] === b[key])
 }
 
 export function currentEvidence(game: Game) {
@@ -155,74 +70,123 @@ export function currentEvidence(game: Game) {
 }
 
 export function repairOptions(game: Game) {
-  const estimate = testDesign(game.design)
-  return remedies.filter(remedy => {
-    if (remedy === 'compliant') return !estimate.ditlPass
-    const changed = testDesign(applyRemedy(game.design, remedy))
-    return (changed.deficit < estimate.deficit && changed.dataPass)
-      || (!estimate.dataPass && changed.dataPass && changed.powerPass)
-  })
+  return rulesFor(game).repairOptions(game.design)
 }
 
-function record(game: Game, id: LogId, cost = 0, report?: Evidence): Game {
-  return { ...game, log: [...game.log, { id, week: game.week, cost, design: game.design, ...(report ? { report } : {}) }] }
+export function pendingEvent(game: Game) {
+  return game.event ? rulesFor(game).events?.find(event => event.id === game.event) ?? null : null
 }
 
-function spend(game: Game, work: Work, cost = workCost(game, work)): Game {
+export function eventChoice(game: Game, eventId: string) {
+  return game.events.find(entry => entry.startsWith(`${eventId}:`))?.slice(eventId.length + 1) ?? null
+}
+
+function record(game: Game, id: string, cost = 0, report?: Evidence, label?: Game['log'][number]['label']): Game {
+  return {
+    ...game,
+    log: [...game.log, { id, week: game.week, cost, design: game.design, ...(report ? { report } : {}), ...(label ? { label } : {}) }],
+  }
+}
+
+function spend(game: Game, work: string, cost: Cost = rulesFor(game).costs[work]): Game {
   return record({ ...game, week: game.week + cost.weeks, credits: game.credits - cost.credits }, work, cost.credits)
 }
 
 function stop(game: Game, reason: Stop): Game {
-  return { ...game, stage: 'results', stop: reason }
+  return { ...game, stage: 'results', stop: reason, event: null }
 }
 
 function checkResources(game: Game): Game {
   if (game.stage === 'review' || game.stage === 'flight' || game.stage === 'results') return game
-  if (availableWeeks(game) === 0) return stop(game, 'deadline')
+  if (availableWeeks(game) <= 0) return stop(game, 'deadline')
   const work = currentWork(game)
   if (work && game.stage !== 'design' && game.credits < workCost(game, work).credits) return stop(game, 'funds')
-  if (game.stage === 'design') {
-    const cheapest = mission.costs.freeze.credits
-      + Math.min(...Object.values(mission.payloads).map(option => option.cost))
-      + Math.min(...Object.values(mission.supplies).map(option => option.cost))
-    if (game.credits < cheapest) return stop(game, 'funds')
-  }
+  if (game.stage === 'design' && game.credits < cheapestFreeze(rulesFor(game))) return stop(game, 'funds')
   return game
+}
+
+function triggerEvent(game: Game): Game {
+  if (game.event || game.stage === 'flight' || game.stage === 'results') return game
+  const event = rulesFor(game).events?.find(item => eventChoice(game, item.id) === null && item.trigger(game))
+  return event ? { ...game, event: event.id } : game
+}
+
+function advance(game: Game) {
+  return triggerEvent(checkResources(game))
 }
 
 function doWork(game: Game): Game {
   const work = currentWork(game)
   if (!work || !affordable(game, workCost(game, work))) return game
-  const next = spend(game, work)
+  const next = spend(game, work, workCost(game, work))
   switch (work) {
-    case 'assess': return checkResources({ ...next, stage: 'design', gate: 'PDR' })
-    case 'freeze': return checkResources({ ...next, stage: 'build', gate: 'CDR' })
-    case 'build': return checkResources({ ...next, stage: 'integration' })
+    case 'assess': return advance({ ...next, stage: 'design', gate: 'PDR' })
+    case 'freeze': return advance({ ...next, stage: 'build', gate: 'CDR' })
+    case 'build': return advance({ ...next, stage: 'integration' })
     case 'integrate': {
-      const evidence = { ...testDesign(game.design), week: next.week, revision: next.revision }
-      return {
+      const evidence = { ...rulesFor(game).test(game.design), week: next.week, revision: next.revision }
+      return triggerEvent({
         ...next, stage: 'review', evidence, returned: false,
         log: [...next.log.slice(0, -1), { ...next.log[next.log.length - 1], report: evidence }],
-      }
+      })
     }
   }
 }
 
+function finishContact(game: Game, flight: FlightResult): Game {
+  const { contact: _finished, ...next } = game
+  return record({ ...next, stage: 'results', flight }, 'operate')
+}
+
 export function runMission(game: Game, action: Action): Game {
+  const mission = rulesFor(game)
+  if (game.playback) {
+    if (action.type !== 'advanceLab' || action.playback !== game.playback) return game
+    const { kind, step } = game.playback
+    const length = mission.labSteps?.(game, kind) ?? 0
+    if (!action.skip && step + 1 < length) return { ...game, playback: { kind, step: step + 1 } }
+    const { playback: _completed, ...next } = game
+    const evidence = currentEvidence(next)
+    return kind === 'integration' && evidence && !passes(evidence) ? runMission(next, { type: 'review' }) : next
+  }
   if (game.stage === 'results') return game
+  if (game.event && action.type !== 'choose') return game
   switch (action.type) {
+    case 'choose': {
+      const event = pendingEvent(game)
+      const choice = event?.choices.find(item => item.id === action.choice)
+      if (!event || !choice) return game
+      const applied = choice.apply(game)
+      const resolved = { ...applied, event: null, events: [...game.events, `${event.id}:${choice.id}`] }
+      return advance(record(resolved, 'event', Math.max(0, game.credits - applied.credits), undefined, choice.label))
+    }
     case 'configure':
-      return canConfigure(game) && !sameDesign(game.design, action.design) ? { ...game, design: action.design } : game
+      if (!canConfigure(game) || sameDesign(game.design, action.design)
+        || !Object.entries(mission.groups).every(([key, group]) => Object.hasOwn(group.options, action.design[key]))) return game
+      return { ...game, design: action.design }
+    case 'configStep':
+      return mission.configurationSteps?.[game.stage]?.includes(action.step) ? { ...game, configStep: action.step } : game
     case 'work':
       return doWork(game)
+    case 'runLab': {
+      if (!mission.labSteps || (game.stage !== 'build' && game.stage !== 'integration')) return game
+      const next = doWork(game)
+      if (next === game) return game
+      return game.stage === 'build'
+        ? { ...next, benchLead: action.benchLead, playback: { kind: 'assembly', step: 0 } }
+        : { ...next, testFocus: action.testFocus, playback: { kind: 'integration', step: 0 } }
+    }
+    case 'advanceLab':
+      return game
     case 'analyze': {
       if (!canConfigure(game) || (game.analysis && sameDesign(game.analysis.design, game.design))
         || !affordable(game, mission.costs.analyze)) return game
-      const result = forecast(game.design)
+      const result = mission.forecast(game.design)
       const next = spend(game, 'analyze')
-      return checkResources({
+      const id = mission.forecastClear(result) ? 'analysisClear' : 'analysisConflict'
+      return advance({
         ...next, analysis: { design: game.design, forecast: result },
-        log: [...next.log.slice(0, -1), { ...next.log[next.log.length - 1], id: result.deficit ? 'analysisConflict' : 'analysisClear' }],
+        log: [...next.log.slice(0, -1), { ...next.log[next.log.length - 1], id }],
       })
     }
     case 'review': {
@@ -237,27 +201,47 @@ export function runMission(game: Game, action: Action): Game {
     case 'repair': {
       const cost = mission.costs[action.remedy]
       if (game.stage !== 'review' || !game.returned || !repairOptions(game).includes(action.remedy) || !affordable(game, cost)) return game
-      const design = applyRemedy(game.design, action.remedy)
+      const design = mission.applyRemedy(game.design, action.remedy)
       const next = spend({ ...game, design, revision: game.revision + 1 }, action.remedy)
-      return checkResources({ ...next, stage: 'integration', returned: false })
+      return advance({ ...next, stage: 'integration', returned: false })
     }
     case 'wait':
       if (game.stage === 'flight' || (game.stage === 'review' && !game.returned)
         || !affordable(game, mission.costs.wait)) return game
       return game.stage === 'review' && availableWeeks(game) === 1
         ? stop(spend(game, 'wait'), 'deadline')
-        : checkResources(spend(game, 'wait'))
+        : advance(spend(game, 'wait'))
     case 'cancel':
       return game.stage === 'flight' ? game : stop(game, 'cancelled')
-    case 'fly': {
+    case 'fly':
+    case 'startContact': {
       const evidence = currentEvidence(game)
-      if (game.stage !== 'flight' || !evidence || !passes(evidence)) return game
-      const capacity = evidence.contactCapacity ?? forecast(game.design).contactCapacity
-      const diagnostics = action.choice === 'diagnostics' ? Math.min(capacity, mission.diagnosticBatches) : 0
-      const requested = action.choice === 'priority' ? mission.minimumBatches : evidence.batches
-      const batches = Math.min(requested, evidence.batches, capacity - diagnostics)
-      const flight = { choice: action.choice, batches, diagnostics, stretch: batches >= mission.stretchBatches, firstTx: evidence.ditl.firstTx }
-      return record({ ...game, stage: 'results', flight }, 'operate')
+      if (game.stage !== 'flight' || game.contact || !evidence || !passes(evidence) || !mission.flightChoices.includes(action.choice)) return game
+      if (action.type === 'fly') return record({ ...game, stage: 'results', flight: mission.fly(evidence, action.choice) }, 'operate')
+      if (!mission.contact) return game
+      const { batches, diagnostics } = mission.contact.plan(evidence, action.choice)
+      if (!batches && !diagnostics) return finishContact(game, mission.contact.finish(evidence, action.choice, 0))
+      return { ...game, contact: { choice: action.choice, next: 0, accepted: 0, diagnosticsPending: diagnostics > 0 } }
+    }
+    case 'checkDiagnostics': {
+      const { contact } = game
+      const evidence = currentEvidence(game)
+      if (game.stage !== 'flight' || !evidence || !contact?.diagnosticsPending || !mission.contact) return game
+      return mission.contact.plan(evidence, contact.choice).batches
+        ? { ...game, contact: { ...contact, diagnosticsPending: false } }
+        : finishContact(game, mission.contact.finish(evidence, contact.choice, 0))
+    }
+    case 'checkBatch': {
+      const { contact } = game
+      const evidence = currentEvidence(game)
+      if (game.stage !== 'flight' || !evidence || !contact || contact.diagnosticsPending
+        || action.batch !== contact.next || !mission.contact) return game
+      const { batches } = mission.contact.plan(evidence, contact.choice)
+      const accepted = contact.accepted + Number(action.deliver)
+      const next = contact.next + 1
+      return next === batches
+        ? finishContact(game, mission.contact.finish(evidence, contact.choice, accepted))
+        : { ...game, contact: { ...contact, next, accepted } }
     }
   }
 }

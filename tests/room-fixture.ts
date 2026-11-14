@@ -2,8 +2,7 @@ import { getApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 import { collection, doc, getDocFromServer, getDocsFromServer, getFirestore, updateDoc } from 'firebase/firestore'
 import { confirmRoom } from '../src/multiplayer/client'
-import type { MultiplayerRemedy } from '../src/game/mission'
-import type { Department } from '../src/missions/cubesat'
+import type { Department, MultiplayerRemedy } from '../src/missions/cubesat'
 
 function services(code: string) {
   const app = getApp('space-mission')

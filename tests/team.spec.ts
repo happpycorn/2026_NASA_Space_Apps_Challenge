@@ -6,7 +6,7 @@ async function host(page: Page) {
   await page.goto('/')
   await page.getByRole('button', { name: 'Team review' }).click()
   await page.getByRole('button', { name: 'Create room as PM' }).click()
-  const code = page.locator('.metric').filter({ hasText: 'Room code' }).locator('strong')
+  const code = page.locator('.resource-line > div').filter({ hasText: 'Room code' }).locator('dd')
   await expect(code).toHaveText(/^[A-Z2-9]{8}$/)
   return (await code.textContent())!
 }
@@ -33,7 +33,7 @@ test.describe('Firebase emulator', () => {
       await expect(pm.getByRole('button', { name: 'Confirm and retest' })).toBeDisabled()
       await join(guest, code)
       await guest.getByRole('button', { name: 'Science Open' }).click()
-      await expect(guest.getByRole('heading', { name: 'Science' })).toBeVisible()
+      await expect(guest.locator('.proposal-panel .report-speaker').filter({ hasText: /^Science$/ })).toBeVisible()
       await expect(guest.getByRole('button', { name: 'Confirm and retest' })).toHaveCount(0)
       await guest.getByRole('radio', { name: /Stagger operations/ }).check()
       await guest.getByRole('button', { name: 'Send proposal' }).click()
@@ -53,14 +53,14 @@ test.describe('Firebase emulator', () => {
 
       await guest.getByRole('button', { name: '繁中' }).click()
       await guest.reload()
-      await expect(guest.getByRole('heading', { name: '科學組' })).toBeVisible()
+      await expect(guest.locator('.proposal-panel .report-speaker').filter({ hasText: /^科學組$/ })).toBeVisible()
       await expect(guest.getByRole('radio', { name: /換成基本成像儀/ })).toBeChecked()
       await expect(pm.getByRole('radio', { name: /Power.*Game proposal.*Upgrade power supply/ })).toBeVisible()
       await pm.getByRole('radio', { name: /Science.*Player proposal.*Switch to baseline imager/ }).check()
       await pm.getByRole('button', { name: 'Confirm and retest' }).click()
       await expect(pm.getByRole('heading', { name: 'Integration passed' })).toBeVisible()
       await expect(guest.getByRole('heading', { name: '整合通過' })).toBeVisible()
-      await expect(guest.getByText('修正與重測 · 2 週 · 18 經費')).toBeVisible()
+      await expect(guest.getByText('修正與重測 · 2 週 · $180,000')).toBeVisible()
 
       const repeats = await pm.evaluate(async ({ path, code }) => {
         const fixture: typeof import('./room-fixture') = await import(path)
@@ -82,6 +82,8 @@ test.describe('Firebase emulator', () => {
       await Promise.all([pm.reload(), guest.reload()])
       await expect(pm.getByRole('heading', { name: 'Integration passed' })).toBeVisible()
       await expect(guest.getByRole('heading', { name: '整合通過' })).toBeVisible()
+      await expect(guest.getByText('第 6 週・設計版本 1')).toBeHidden()
+      await guest.locator('summary').filter({ hasText: '整合驗證證據' }).click()
       await expect(guest.getByText('第 6 週・設計版本 1')).toBeVisible()
       expect(await guest.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
     } finally {
@@ -103,7 +105,7 @@ test('a four-player room stores only the winning decision during concurrent conf
       const guest = page as Page
       await join(guest, code)
       await guest.getByRole('button', { name: `${label} Open` }).click()
-      await expect(guest.getByRole('heading', { name: label as string })).toBeVisible()
+      await expect(guest.locator('.proposal-panel .report-speaker').filter({ hasText: label as string })).toBeVisible()
     }))
 
     await science.getByRole('radio', { name: /Switch to baseline imager/ }).check()

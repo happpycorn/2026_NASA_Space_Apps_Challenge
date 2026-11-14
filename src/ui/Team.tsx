@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Check, Radio, UsersRound } from 'lucide-react'
-import {
-  forecast, passes, resolveTeamReview, reviewDesign, type MultiplayerRemedy,
-} from '../game/mission'
+import { Check, Radio } from 'lucide-react'
+import { passes } from '../game/mission'
 import { readLocal, writeLocal } from '../game/storage'
 import type { Message, Translate } from '../i18n'
-import { cubeSat, departments, proposals, type Department } from '../missions/cubesat'
+import { cubeSatMission } from '../missions'
+import { cubeSat, departments, proposals, resolveTeamReview, reviewDesign, testDesign, type Department, type MultiplayerRemedy } from '../missions/cubesat'
+import { PowerBreakdown, powerFinding, RemedyPreview } from '../missions/cubesat-ui'
 import { claimRole, confirmRoom, createRoom, openRoom, roomIdentity, RoomError, submitProposal, watchRoom } from '../multiplayer/client'
 import { activeRoomKey } from '../multiplayer/config'
 import { hasPlayerProposal, proposalFor, roleFor, roles, type Room } from '../multiplayer/model'
-import { ActionButton, Back, CostLabel, DesignTags, EvidenceReport, Heading, Metric, PowerReadout, RemedyPreview } from './shared'
+import { ActionButton, Back, CostLabel, DesignSummary, Disclosure, EvidenceReport, Heading, money } from './shared'
+import { ReportCard } from './ReportCard'
 
-const current = forecast(reviewDesign)
+const current = testDesign(reviewDesign)
 const baseWeek = cubeSat.costs.assess.weeks + cubeSat.costs.freeze.weeks + cubeSat.costs.build.weeks + cubeSat.costs.integrate.weeks
 const baseBudget = cubeSat.budget - cubeSat.payloads[reviewDesign.payload].cost - cubeSat.supplies[reviewDesign.supply].cost
   - cubeSat.costs.assess.credits - cubeSat.costs.freeze.credits - cubeSat.costs.build.credits - cubeSat.costs.integrate.credits
@@ -38,9 +39,8 @@ function PlayerProposal({ department, room, t, disabled, onSubmit }: {
   const previous = room.proposals[department]?.remedy
   const [draft, setDraft] = useState<MultiplayerRemedy | null>(null)
   const selected = draft ?? previous
-  return <section className="panel proposal-panel">
-    <h2>{t(department)}</h2>
-    <p>{roleBrief(department, t)}</p>
+  return <section className="proposal-panel">
+    <ReportCard speaker={department} t={t}><p>{roleBrief(department, t)}</p></ReportCard>
     <fieldset className="options" disabled={disabled}>
       <legend>{t('teamProposal')}</legend>
       {proposals[department].options.map(remedy => <label className="option" key={remedy}>
@@ -58,16 +58,16 @@ function PlayerProposal({ department, room, t, disabled, onSubmit }: {
 
 type Selection = { department: Department; remedy: MultiplayerRemedy }
 
-function TeamProposals({ room, isPm, t, disabled, onConfirm }: {
-  room: Room; isPm: boolean; t: Translate; disabled: boolean
-  onConfirm: (selection: Selection) => void
+function TeamProposals({ room, t, disabled, onConfirm }: {
+  room: Room; t: Translate; disabled: boolean
+  onConfirm?: (selection: Selection) => void
 }) {
+  const isPm = Boolean(onConfirm)
   const [selection, select] = useState<Selection | null>(null)
   const fresh = selection && proposalFor(room, selection.department).remedy === selection.remedy
   const ready = hasPlayerProposal(room)
-  return <section className="panel proposal-panel">
-    <h2>{t('allProposals')}</h2>
-    {isPm && <p>{t('pmBrief')}</p>}
+  return <section className="proposal-panel">
+    {isPm && <h2>{t('allProposals')}</h2>}
     <div className="proposal-list">
       {departments.map(department => {
         const { remedy, automatic } = proposalFor(room, department)
@@ -91,11 +91,11 @@ function TeamProposals({ room, isPm, t, disabled, onConfirm }: {
       ? <>
         {!ready && <p>{t('waitingProposal')}</p>}
         {selection && !fresh && <p className="notice" role="status">{t('roomErrorStale')}</p>}
-        <ActionButton disabled={disabled || !ready || !fresh} onClick={() => selection && onConfirm(selection)}>
+        <ActionButton disabled={disabled || !ready || !fresh} onClick={() => selection && onConfirm?.(selection)}>
           {t('confirmTeam')}
         </ActionButton>
       </>
-      : <p>{t('teamWaitingResult')}</p>}
+      : null}
   </section>
 }
 
@@ -105,7 +105,7 @@ function RoomResult({ room, t }: { room: Room; t: Translate }) {
   const result = resolveTeamReview(decision.remedy)
   const pass = passes(result.evidence)
   return <>
-    <section className="panel result-banner">
+    <section className="result-banner">
       {pass ? <Check size={24} aria-hidden /> : <Radio size={24} aria-hidden />}
       <div>
         <h2>{t(pass ? 'teamPass' : 'teamFail')}</h2>
@@ -113,16 +113,18 @@ function RoomResult({ room, t }: { room: Room; t: Translate }) {
         <small>{t('teamCosts')} · <CostLabel t={t} {...result} /></small>
       </div>
     </section>
-    <EvidenceReport t={t} evidence={{ ...result.evidence, week: baseWeek + result.weeks, revision: 1 }} />
+    <Disclosure label={t('report')}>
+      <EvidenceReport mission={cubeSatMission} t={t} evidence={{ ...result.evidence, week: baseWeek + result.weeks, revision: 1 }} />
+    </Disclosure>
   </>
 }
 
 function RolePicker({ room, t, disabled, onClaim }: {
   room: Room; t: Translate; disabled: boolean; onClaim: (department: Department) => void
 }) {
-  return <section className="panel proposal-panel">
+  return <section className="proposal-panel">
     <h2>{t('chooseRole')}</h2>
-    <p>{t('chooseRoleDetail')}</p>
+    <ReportCard speaker="review" t={t}><p>{t('chooseRoleDetail')}</p></ReportCard>
     <div className="proposal-list">
       {departments.map(department => <button key={department} className="button secondary row"
         disabled={disabled || Boolean(room.roles[department])} onClick={() => onClaim(department)}>
@@ -190,12 +192,11 @@ export default function Team({ t, back }: { t: Translate; back: () => void }) {
   const result = room?.decision && resolveTeamReview(room.decision.remedy)
   const disabled = busy || !online
 
-  return <>
+  return <article className="manual">
     <Back t={t} onClick={leave} />
-    <Heading eyebrow={t('multiplayer')} title={t('roomTitle')}>{t('roomIntro')}</Heading>
+    <Heading title={t('roomTitle')}>{!room && t('roomIntro')}</Heading>
     {error && <p role="alert" className="notice">{t(error)}</p>}
-    {!code && <div className="board">
-      <section className="panel team-form">
+    {!code && <section className="next-decision team-form">
         <ActionButton disabled={busy} onClick={() => void perform(async () => goToRoom(await createRoom()))}>
           {t('createRoom')}
         </ActionButton>
@@ -211,43 +212,46 @@ export default function Team({ t, back }: { t: Translate; back: () => void }) {
             <button className="button secondary" disabled={busy}>{t('joinRoom')}</button>
           </div>
         </form>
-      </section>
-      <section className="panel"><h2>{t('teamSize')}</h2><p>{roles.map(item => t(item)).join(' · ')}</p></section>
-    </div>}
+    </section>}
     {code && !room && <p role="status">{t('roomConnecting')}</p>}
     {room && <>
       {!online && <p role="status" className="notice">{t('roomOffline')}</p>}
-      <div className="metrics">
-        <Metric label={t('roomCode')} value={code} detail={t('roomCodeDetail')} />
-        <Metric label={t('time')} value={t('weeks', { count: cubeSat.deadline - baseWeek - (result ? result.weeks : 0) })}
-          detail={t('round', { count: room.roundId.split('-').at(-1) ?? '' })} />
-        <Metric label={t('budget')} value={t('credits', { count: baseBudget - (result ? result.credits : 0) })} />
-      </div>
-      <div className="board">
-        <div className="stack">
-          {room.decision ? <RoomResult room={room} t={t} /> : <>
-            {!role && <RolePicker room={room} t={t} disabled={disabled}
-              onClaim={department => void perform(() => claimRole(code, department))} />}
-            {role && role !== 'pm' && <PlayerProposal key={role} department={role} room={room} t={t} disabled={disabled}
-              onSubmit={remedy => void perform(() => submitProposal(code, role, room.roundId, remedy))} />}
-            {role && <TeamProposals room={room} isPm={role === 'pm'} t={t} disabled={disabled}
-              onConfirm={({ department, remedy }) => void perform(() => confirmRoom(code, department, room.roundId, remedy))} />}
+      <dl className="resource-line">
+        <div><dt>{t('roomCode')}</dt><dd>{code}</dd></div>
+        <div><dt>{t('flightWindow')}</dt><dd>{t('weeks', { count: cubeSat.deadline - baseWeek - (result?.weeks ?? 0) })}</dd></div>
+        <div><dt>{t('budgetLabel')}</dt><dd>{money(baseBudget - (result?.credits ?? 0))}</dd></div>
+      </dl>
+      <div className="next-decision">
+        {room.decision ? <RoomResult room={room} t={t} /> : <>
+          {!role && <RolePicker room={room} t={t} disabled={disabled}
+            onClaim={department => void perform(() => claimRole(code, department))} />}
+          {role === 'pm' && <ReportCard speaker="test" t={t} attention>
+            <p>{powerFinding(current, t)}</p>
+            <p>{t('reportTeamDecision')}</p>
+          </ReportCard>}
+          {role === 'pm' && <TeamProposals room={room} t={t} disabled={disabled}
+            onConfirm={({ department, remedy }) => void perform(() => confirmRoom(code, department, room.roundId, remedy))} />}
+          {role && role !== 'pm' && <>
+            <PlayerProposal key={role} department={role} room={room} t={t} disabled={disabled}
+              onSubmit={remedy => void perform(() => submitProposal(code, role, room.roundId, remedy))} />
+            {room.proposals[role] && <p role="status">{t('teamWaitingResult')}</p>}
           </>}
-        </div>
-        <aside className="stack">
-          <section className="panel">
-            <h2>{t('teamCurrent')}</h2>
-            <DesignTags t={t} design={reviewDesign} />
-            <PowerReadout t={t} estimate={current} />
-          </section>
-          <section className="panel">
-            <h2 className="icon-title"><UsersRound size={18} aria-hidden />{t('teamSize')}</h2>
-            <ul className="role-list">
-              {roles.map(item => <li key={item}><span>{t(item)}</span><small>{t(room.roles[item] ? 'roleTaken' : 'roleOpen')}</small></li>)}
-            </ul>
-          </section>
-        </aside>
+        </>}
       </div>
+      <aside className="references" aria-label={t('missionInfo')}>
+        {role && role !== 'pm' && !room.decision && <Disclosure label={t('allProposals')}>
+          <TeamProposals room={room} t={t} disabled={disabled} />
+        </Disclosure>}
+        <Disclosure label={t('teamCurrent')}>
+          <DesignSummary mission={cubeSatMission} design={reviewDesign} t={t} />
+          <PowerBreakdown design={reviewDesign} t={t} />
+        </Disclosure>
+        <Disclosure label={t('teamSize')} value={t('round', { count: room.roundId.split('-').at(-1) ?? '' })}>
+          <dl className="fact-list">
+            {roles.map(item => <div key={item}><dt>{t(item)}</dt><dd>{t(room.roles[item] ? 'roleTaken' : 'roleOpen')}</dd></div>)}
+          </dl>
+        </Disclosure>
+      </aside>
     </>}
-  </>
+  </article>
 }

@@ -1,5 +1,5 @@
 import { departments, proposals, type Department } from '../missions/cubesat'
-import type { MultiplayerRemedy } from '../game/mission'
+import type { MultiplayerRemedy } from '../missions/cubesat'
 
 export const roles = ['pm', ...departments] as const
 export type Role = typeof roles[number]

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { initialDesign, newGame, resolveTeamReview, runMission, testDesign, type Game } from '../src/game/mission'
+import { newGame, runMission, type Game } from '../src/game/mission'
+import { initialDesign, resolveTeamReview, testDesign } from '../src/missions/cubesat'
 
 function work(game: Game, count: number) {
   for (let week = 0; week < count; week += 1) game = runMission(game, { type: 'work' })
@@ -17,7 +18,7 @@ test('power and data checks respond to all four hardware combinations', () => {
 })
 
 test('optional early analysis records its configuration and leaves a week in reserve', () => {
-  let game = newGame()
+  let game = newGame('cubesat')
   game = runMission(game, { type: 'configure', design: { ...game.design, payload: 'advanced' } })
   game = runMission(game, { type: 'analyze' })
   assert.equal(game.analysis?.forecast.deficit, 3)
@@ -29,7 +30,7 @@ test('optional early analysis records its configuration and leaves a week in res
 })
 
 test('DITL-only correction invalidates evidence and costs another integration test', () => {
-  let game = newGame()
+  let game = newGame('cubesat')
   game = runMission(game, { type: 'configure', design: { ...game.design, radio: 'early' } })
   game = runMission(work(game, 4), { type: 'review' })
   assert.equal(game.evidence?.ditl.firstTx, 20)
@@ -51,4 +52,41 @@ test('team corrections use the same test, power tradeoffs and costs', () => {
   assert.equal(stagger.evidence.batches, 3)
   assert.equal(upgraded.evidence.batches, 4)
   assert.equal(upgraded.credits, 24)
+})
+
+test('integration playback consumes one test and one return even with stale advance actions', () => {
+  let game = newGame()
+  game = runMission(game, { type: 'configure', design: { ...initialDesign, payload: 'advanced' } })
+  game = work(game, 3)
+  game = runMission(game, { type: 'runLab', testFocus: 'imaging' })
+  assert.ok(game.playback)
+  const first = game.playback
+  const second = runMission(game, { type: 'advanceLab', playback: first })
+  assert.equal(runMission(second, { type: 'advanceLab', playback: first, skip: true }), second)
+  assert.equal(runMission(second, { type: 'runLab' }), second)
+  const returned = runMission(second, { type: 'advanceLab', playback: second.playback!, skip: true })
+  assert.equal(returned.returned, true)
+  assert.equal(returned.week, 4)
+  assert.equal(returned.credits, 38)
+  assert.deepEqual(returned.log.slice(-2).map(entry => entry.id), ['integrate', 'return'])
+})
+
+test('ground delivery counts accepted batches and ignores unchecked or repeated batch actions', () => {
+  let game = newGame()
+  game = runMission(game, { type: 'configure', design: { ...initialDesign, payload: 'advanced', supply: 'reinforced' } })
+  const approved = runMission(work(game, 4), { type: 'review' })
+  assert.equal(approved.stage, 'flight')
+  assert.equal(runMission(approved, { type: 'checkBatch', batch: 0, deliver: true }), approved)
+  game = runMission(approved, { type: 'startContact', choice: 'extra' })
+  assert.equal(runMission(game, { type: 'checkBatch', batch: 1, deliver: true }), game)
+  game = runMission(game, { type: 'checkBatch', batch: 0, deliver: false })
+  assert.equal(runMission(game, { type: 'checkBatch', batch: 0, deliver: true }), game)
+  for (let batch = 1; batch <= 3; batch += 1) game = runMission(game, { type: 'checkBatch', batch, deliver: true })
+  assert.equal(game.stage, 'results')
+  assert.equal(game.flight?.batches, 3)
+  assert.equal(game.flight?.archived, 1)
+  assert.equal(game.flight?.stretch, false)
+  assert.equal(game.log.filter(entry => entry.id === 'operate').length, 1)
+  assert.equal(game.credits, approved.credits)
+  assert.equal(game.week, approved.week)
 })
