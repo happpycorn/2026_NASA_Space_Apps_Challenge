@@ -210,23 +210,22 @@ test('fast-forward and full playback end with the same saved mission', async ({ 
   expect(skipped).toEqual(full)
 })
 
-test('a pre-lab autosave resumes at flight review', async ({ page }) => {
+test('a saved mission resumes at flight review and can archive a batch', async ({ page }) => {
   await page.goto('/')
   await page.evaluate(() => {
     const design = { payload: 'basic', supply: 'standard', schedule: 'overlap', radio: 'compliant' }
-    localStorage.setItem('space-mission.single.v1', JSON.stringify({
-      missionId: 'cubesat', stage: 'review', week: 4, credits: 45, design, revision: 0, gate: 'CDR',
-      analysis: null, flight: null, stop: null, returned: false, log: [],
+    localStorage.setItem('space-mission.single.v2', JSON.stringify({
+      missionId: 'cubesat', stage: 'review', week: 4, deadline: 6, credits: 45, design, revision: 0, gate: 'CDR',
+      analysis: null, flight: null, stop: null, returned: false, event: null, events: [], records: [], log: [],
       evidence: {
         design, payloadWatts: 3, peak: 9, available: 10, deficit: 0, contactCapacity: 4, batches: 2, testedBatches: 2,
         ditl: { separation: 0, deploy: 15, firstTx: 32, elapsed: 32, threshold: 30 },
-        powerPass: true, ditlPass: true, dataPass: true, week: 4, revision: 0,
+        powerPass: true, ditlPass: true, dataPass: true, checks: [true, true, true], week: 4, revision: 0,
       },
     }))
   })
   await page.reload()
   await button(page, 'Continue mission').click()
-  expect(await saved(page)).toMatchObject({ deadline: 6, events: [], records: [], evidence: { checks: [true, true, true] } })
   await button(page, labels.en.review).click()
   await button(page, labels.en.pass).click()
   await finishDelivery(page, 1)

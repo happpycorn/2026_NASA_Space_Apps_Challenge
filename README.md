@@ -83,7 +83,7 @@ npm exec -- firebase deploy --only firestore:rules,hosting --project YOUR_PROJEC
 3. 新增對應的畫面元件（參考 [`cubesat-ui.tsx`](src/missions/cubesat-ui.tsx)），在 [`src/missions/index.ts`](src/missions/index.ts) 的 `missions` 登記。
 4. 文案加進兩份 i18n 字典。
 
-達成前一個任務的最低要求後，下一個任務才會解鎖。進度和聲望存在瀏覽器（`space-mission.progress.v1`）。現有立方衛星存檔會在讀取時升級，可繼續遊玩。事件觸發時，玩家要先做選擇才能繼續。選擇結果記在 `game.events`，規則可以用 `eventChoice` 讀取。任務 `records` 回傳的成果會帶進之後的任務（`game.records`），可以用來觸發邀約。
+達成前一個任務的最低要求後，下一個任務才會解鎖。進度和聲望存在瀏覽器（`space-mission.progress.v1`）。事件觸發時，玩家要先做選擇才能繼續。選擇結果記在 `game.events`，規則可以用 `eventChoice` 讀取。任務 `records` 回傳的成果會帶進之後的任務（`game.records`），可以用來觸發邀約。
 
 [官方挑戰資源](https://www.spaceappschallenge.org/2026/challenges/space-mission-design-game/?tab=resources)列出《CubeSat 101》。大廳使用立方衛星的像素插畫。
 
