@@ -1,7 +1,7 @@
 import { orbitalCapacity, orbitalCarried, orbitalDegradedCapacity, orbitalLaunch, orbitalRisks, type OrbitalDesign } from '../missions/orbital-launch'
 import { completed } from '../missions/chapter'
 import { lunarMission, lunarPlanBatches } from '../missions/lunar-mission'
-import { lunarAllocation, lunarBudgetForecast, lunarCorrection, lunarDesign, lunarMarginCopy, lunarPlanCost, massBudget } from '../missions/lunar-rules'
+import { lunarAllocation, lunarBudgetForecast, lunarCorrection, lunarDesign, lunarMarginCopy, massBudget } from '../missions/lunar-rules'
 import { orbitalCorrection, orbitalPlanCost, orbitalState } from '../missions/orbital-rules'
 import { commissionCanConfigure, commissionFor, commissionLimits, commissionPlan, commissionRepairs, commissions, type CommissionId } from '../missions/cubesat-commission'
 import { CommissionDeliveryFeedback, CommissionNote, CommissionOption, CommissionPlan, deliveryEstimate } from '../missions/cubesat-commission-ui'
@@ -569,11 +569,13 @@ function MissionRating({ game, mission, t }: Pick<Props, 'game' | 'mission' | 't
   const { flight } = game
   const left = game.missionId === cubeSat.id ? game.credits : flight?.credits ?? game.credits
   const reserveTarget = game.missionId === lunarMission.id ? lunarMission.returnedReserveForEfficiency : Math.ceil(mission.budget / 10)
+  const share = mission.ui.verifiedShare?.(game)
   const criteria = [
     { id: 'ratingDelivered', met: Boolean(flight?.delivered) },
     { id: 'ratingStretch', met: Boolean(flight?.stretch) },
     { id: 'ratingReserve', met: Boolean(flight?.delivered) && left >= reserveTarget },
-    { id: 'ratingVerified', met: game.log.some(entry => mission.ui.verificationWork?.has(entry.id.replace(/^(lab|support):/, '')) && !entry.incomplete)
+    { id: share ? 'ratingVerifiedMost' : 'ratingVerified', met: (share ? share.verified * 2 > share.total
+      : game.log.some(entry => mission.ui.verificationWork?.has(entry.id.replace(/^(lab|support):/, '')) && !entry.incomplete))
       && !mission.ui.knownDefectAtLaunch?.(game) },
   ] as const
   const stars = criteria.filter(item => item.met).length
@@ -1182,6 +1184,8 @@ function Studio({ game, mission, t, send, back, languageControls }: Props) {
   const flightChoices = context && segment?.choices?.(context) || []
   const flightBrief = context && segment?.brief?.(context)
   const flightStatus = context && segment?.status?.(context)
+  // Credits spent in flight are only written back at the end, so the status bar follows the flight's own count.
+  const flightCredits = flightStatus && typeof flightStatus.values?.credits === 'number' ? flightStatus.values.credits : undefined
   const flightFile = context && segment?.file?.(context)
   const flightQuote = context && segment?.quote?.(context)
   const review = pendingReview(game)
@@ -1393,7 +1397,7 @@ function Studio({ game, mission, t, send, back, languageControls }: Props) {
     </header>
     <dl className="studio-status" aria-label={t('process')}>
       <div><dt>{t('studioWeek', { week: game.week })}</dt><dd>{t('studioRemaining', { weeks: t('weeks', { count: availableWeeks(game) }) })}</dd></div>
-      <div><dt>{t('budgetLabel')}</dt><dd>{missionMoney(mission, game.credits, t)}</dd></div>
+      <div><dt>{t('budgetLabel')}</dt><dd>{missionMoney(mission, flightCredits ?? game.credits, t)}</dd></div>
       <div><dt>{t(segment ? 'studioCurrentGoal' : 'studioDeliveryTarget')}</dt><dd>{segment ? t(segment.title) : client ? t('dataBatches', { count: client.required })
         : mission.id === orbitalLaunch.id ? t('storyConfirmation', { count: orbitalLaunch.confirmationUnits })
         : t('dataBatches', { count: lunarMission.minimumBatches })}</dd></div>
@@ -1596,6 +1600,6 @@ function DesignReadings({ game, t, compare = false }: { game: Game; t: Translate
     <small>{t('lunarRouteBudget', { correction: route.correctionKg, propellant: route.propellantKg,
       week: game.deadline - route.leadWeeks, allocation: lunarAllocation(game) })}</small>
     <small>{t('studioLunarDeliveryPlan', { count: lunarPlanBatches(design, 'extra', lunarMission.daylightWindows + lunarMission.powers[design.power].nightWindows).batches })}</small>
-    {compare && <small>{t('chapterPlan', lunarPlanCost(game))}</small>}
+    {compare && <small>{t('chapterPlan', lunarBudgetForecast(game))}</small>}
   </span>
 }

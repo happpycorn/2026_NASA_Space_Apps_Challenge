@@ -27,6 +27,8 @@ export type MissionUi = {
   // Work that counts as verification for the results rating.
   verificationWork?: ReadonlySet<string>
   knownDefectAtLaunch?(game: Game): boolean
+  // How many flight risk items had any verification or a fix before launch.
+  verifiedShare?(game: Game): { verified: number; total: number }
   TaskNote?(props: { game: Game; task: string; cost: { weeks: number; credits: number }; t: Translate }): ReactNode
   optionalTasks?: ReadonlySet<string>
   outcome?(game: Game, t: Translate): { title: Message; detail?: Copy }

@@ -253,12 +253,17 @@ export const orbitalRules: MissionRules = {
     PDR: game => {
       if (!completed(game, 'prelim')) return null
       const knowledge = orbitalState(game)
-      const unchecked = [
-        ...(knowledge.lift ? [] : [{ id: 'analysis:lift', label: mission.risks.lift.label }]),
-        ...(knowledge.link.level ? [] : [{ id: 'analysis:link', label: mission.risks.link.label }]),
+      const d = designOf(game)
+      const risks = orbitalRisks(seed(game), d, knowledge)
+      // An unanalysed item needs a signature only while it can still fail. Lift that clears the whole range needs none.
+      const unchecked: { id: string; label: typeof mission.risks.lift.label | typeof mission.risks.link.label; detail: Copy }[] = [
+        ...(knowledge.lift || risks.lift.risk === 0 ? [] : [{ id: 'analysis:lift', label: mission.risks.lift.label,
+          detail: { message: 'orbitalAssumptionLift' as const, values: { percent: percent(risks.lift.risk) } } }]),
+        ...(knowledge.link.level ? [] : [{ id: 'analysis:link', label: mission.risks.link.label,
+          detail: { message: 'orbitalAssumptionLink' as const, values: { percent: percent(risks.link.risk),
+            capacity: mission.grounds[d.ground].capacity, degraded: orbitalDegradedCapacity(d, knowledge) } } }]),
       ]
-      const assumptions = unchecked.map(waiver => ({ detail: { message: waiver.label },
-        waiver: { ...waiver, detail: { message: 'orbitalAssumptions' as const } } }))
+      const assumptions = unchecked.map(waiver => ({ detail: { message: waiver.label }, waiver }))
       return { issues: margin(game) < 0 ? [{ detail: pdr(game) }] : assumptions, approve: pdr(game), return: pdr(game) }
     },
     FRR: (game, evidence) => {

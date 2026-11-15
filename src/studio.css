@@ -228,6 +228,9 @@ html:has(.studio-dialog[open]) { overflow: hidden; }
 
 @media (width < 860px) {
   .studio-workspace { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  /* One column: keep the scene from filling a short window, and keep week and budget in view while scrolling. */
+  .studio-workspace .studio-scene { width: min(100%, 72vh); justify-self: center; }
+  .studio-run .studio-status { position: sticky; top: 0; z-index: 5; }
 }
 @media (width <= 700px) {
   .shell:has(> :is(.studio-run, .studio-brief, .studio-results)) { padding-block-start: 12px; }

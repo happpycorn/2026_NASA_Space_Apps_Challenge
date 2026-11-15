@@ -267,6 +267,10 @@ export const orbitalUi: MissionUi = {
     </>
   },
   knownDefectAtLaunch: game => orbitalState(game).link.found && !orbitalState(game).link.fixed,
+  verifiedShare: game => {
+    const { lift, link } = orbitalState(game)
+    return { verified: Number(lift > 0) + Number(link.level > 0 || link.fixed), total: 2 }
+  },
   sources: sourceList(orbital.sources),
   verificationWork: orbitalVerification,
   optionalTasks: new Set([
@@ -296,10 +300,16 @@ export const orbitalUi: MissionUi = {
 export const lunarUi: MissionUi = {
   Preview: LunarPreview,
   knownDefectAtLaunch: game => Object.values(lunarStates(game)).some(state => state.found && !state.fixed),
+  verifiedShare: game => {
+    const states = Object.values(lunarStates(game))
+    return { verified: states.filter(state => state.level > 0 || state.fixed).length, total: states.length }
+  },
   TaskNote: ({ game, task, cost, t }) => {
     if (lunarVerification.has(task)) {
       const budget = lunarBudgetForecast(game, { credits: cost.credits, usesSupport: task.startsWith('support:') })
-      return <p className={budget.shortfall ? 'warning' : 'action-note'}>
+      // Six optional checks sit side by side, so the budget line only appears on the ones that would run short.
+      if (!budget.shortfall) return null
+      return <p className="warning">
         {t('lunarVerificationBudget', budget)}{' '}
         {budget.savings > 0 && <>{t('lunarBudgetSupport', budget)}{' '}</>}
         {budget.shortfall > 0 && t('lunarBudgetShortfall', budget)}

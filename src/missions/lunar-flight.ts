@@ -82,7 +82,9 @@ const segments: FlightSegment[] = mission.segments.map(segment => {
       }
       if (view || boundary) {
         const actual = view ?? boundary!.view
-        return { message: 'chapterFlightResources', values: { kg: actual.spareKg, credits: actual.credits, windows: actual.windows } }
+        // Surface windows only exist once the lander is down.
+        return { message: id === 'surface' || id === 'night' ? 'chapterFlightResources' : 'chapterFlightResourcesCruise',
+          values: { kg: actual.spareKg, credits: actual.credits, windows: actual.windows } }
       }
     },
     choices: context => {
