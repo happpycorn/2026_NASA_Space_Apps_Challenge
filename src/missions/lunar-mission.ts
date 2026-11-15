@@ -453,6 +453,7 @@ export type LunarSetup = {
   marginKg: number
   credits: number
   revised?: boolean
+  legacyLaunchOrder?: boolean
   responseReserves?: Partial<Record<LunarRisk, number>>
   secondPayload?: boolean
   icd?: 'reviewed' | 'open'
@@ -546,14 +547,18 @@ export function* lunarFlight(seed: number, setup: LunarSetup): Generator<LunarFl
   } else if (launch.id === 'Weather') {
     const choice = yield* ask('card:Weather', credits >= 6 ? ['Rollback', 'Slip'] : ['Slip'])
     if (choice === 'Slip') correctionExtra = 2; else apply(effect(launch.choices, choice))
-  } else {
+  }
+
+  function* lightning() {
     const choice = yield* ask('card:Lightning', states.software.level >= 3 && (!states.software.found || states.software.fixed) ? ['Check', 'Press', 'Switch'] : ['Check', 'Press'])
     if (choice === 'Press') exposed.add('software'); else apply(effect(launch.choices, choice))
   }
+  if (launch.id === 'Lightning' && setup.legacyLaunchOrder) yield* lightning()
 
   // 2 Earth-orbit checkout
   segment = 'checkout'
   yield { type: 'segment', segment, view: view() }
+  if (launch.id === 'Lightning' && !setup.legacyLaunchOrder) yield* lightning()
   if (defect('software')) {
     const cost = setup.icd === 'reviewed' ? 0 : 6 + (setup.icd === 'open' ? lunarMission.uplinkOpenExtra : 0)
     const choice = yield* ask('risk:software', responseFunds('software') >= cost ? ['Uplink', 'Wait', 'Disable'] : ['Wait', 'Disable'])

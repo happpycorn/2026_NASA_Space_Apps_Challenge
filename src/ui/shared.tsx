@@ -31,8 +31,8 @@ export function Heading({ eyebrow, title, children, focusable = false }: { eyebr
   </header>
 }
 
-export function Disclosure({ label, value, children }: { label: string; value?: ReactNode; children: ReactNode }) {
-  return <details className="disclosure">
+export function Disclosure({ label, value, children, open }: { label: string; value?: ReactNode; children: ReactNode; open?: boolean }) {
+  return <details className="disclosure" open={open}>
     <summary><span>{label}</span>{value !== undefined && <span className="disclosure-value">{value}</span>}</summary>
     <div className="disclosure-body">{children}</div>
   </details>

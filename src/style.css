@@ -65,6 +65,10 @@ svg { flex: none; }
 .lobby-team { width: 100%; min-height: 47px; display: flex; align-items: center; gap: 12px; padding: 8px 0; background: none; color: var(--accent); border: 0; border-bottom: 1px solid var(--line); text-align: start; font-weight: 680; }
 .lobby-team small { margin-left: auto; }
 .lobby-team:hover, .disclosure summary:hover { color: #0e6492; }
+.lobby-team-offline, .lobby-team-offline:hover { color: var(--muted); }
+.room-code-display { flex-wrap: wrap; }
+.room-code-display code { user-select: text; }
+.lobby .button[href] { text-decoration: none; }
 
 .manual { max-width: 750px; margin: 0 auto; }
 .section-heading { margin: 19px 0 21px; }
@@ -402,13 +406,16 @@ blockquote { margin-bottom: 19px; border-left: 2px solid var(--line); padding: 3
   flex-wrap: wrap;
 }
 .plan-preview { border: 1px solid var(--line); border-radius: 6px; }
-.plan-preview:has(> .forecast-metrics) { container-type: inline-size; }
+.plan-preview:has(> .forecast-metrics) { container-type: inline-size; overflow: hidden; }
 .forecast-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .forecast-metrics > div { padding: 9px 10px; }
-.forecast-metrics > div + div { border-left: 1px solid var(--line); }
+.forecast-metrics > div + div { border-inline-start: 1px solid var(--line); }
+.forecast-metrics > .forecast-delivery { grid-column: 1 / -1; border-inline-start: 0; border-block-start: 1px solid var(--line); }
 .forecast-metrics dt { color: var(--muted); font-size: .75rem; line-height: 1.35; }
-.forecast-metrics dd { margin-top: 4px; font: 600 .92rem/1.35 var(--mono); }
-.plan-preview .warning { border-top: 1px solid var(--line); font-size: .84rem; padding-block: 7px; }
+.forecast-metrics dd { margin-top: 4px; font: 600 .92rem/1.35 var(--mono); overflow-wrap: anywhere; }
+.forecast-notes { display: grid; gap: 6px; padding: 8px 10px; border-block-start: 1px solid var(--line); }
+.forecast-notes > p { font-size: .83rem; overflow-wrap: anywhere; }
+.plan-preview > .warning { border-block-start: 1px solid var(--line); font-size: .84rem; padding-block: 7px; }
 .option-forecast { color: var(--accent); }
 .option-forecast.bad { color: var(--warn); }
 .evidence-status h2 { font-size: 1rem; margin-bottom: 4px; }
@@ -500,8 +507,13 @@ blockquote { margin-bottom: 19px; border-left: 2px solid var(--line); padding: 3
 
 @container (max-width: 480px) {
   .forecast-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .forecast-metrics > div:nth-child(3) { border-left: 0; }
-  .forecast-metrics > div:nth-child(n + 3) { border-top: 1px solid var(--line); }
+  .forecast-metrics > div:nth-child(odd) { border-inline-start: 0; }
+  .forecast-metrics > div:nth-child(n + 3) { border-block-start: 1px solid var(--line); }
+}
+
+@container (max-width: 250px) {
+  .forecast-metrics { grid-template-columns: minmax(0, 1fr); }
+  .forecast-metrics > div + div { border-inline-start: 0; border-block-start: 1px solid var(--line); }
 }
 
 .phase-table { display: grid; gap: 8px; }

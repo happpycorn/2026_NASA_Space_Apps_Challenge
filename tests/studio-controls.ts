@@ -37,7 +37,7 @@ export async function work(page: Page, name: RegExp, language: Language = 'en') 
   const t = translator(language)
   const action = button(page, name)
   const choose = button(page, t('studioChooseWork'))
-  if (!(await action.isVisible())) await enterMeeting(page, language)
+  await enterMeeting(page, language)
   if (!(await action.isVisible()) && await choose.isVisible()) {
     await choose.click()
   }
@@ -52,8 +52,11 @@ export async function configure(page: Page, group: RegExp, option: RegExp, langu
   const opened = await area.isVisible()
   if (!opened) {
     const compare = button(page, t('studioCompare'))
-    await (await compare.isVisible() ? compare : button(page, t('studioCallMeeting'))).click()
+    const edit = button(page, t('commissionEditPlan'))
+    await (await compare.isVisible() ? compare : await edit.isVisible() ? edit : button(page, t('studioCallMeeting'))).click()
   }
+  const comparison = area.locator('summary').filter({ hasText: t('studioCompare') })
+  if (await comparison.isVisible() && !(await area.getByRole('button', { name: group }).isVisible())) await comparison.click()
   await area.getByRole('button', { name: group }).click()
   await area.getByRole('radio', { name: option }).check()
   const close = button(page, t('studioCloseMeeting'))
@@ -68,10 +71,10 @@ export async function chooseLanguage(page: Page, name: 'EN' | '繁中') {
 
 export async function signReview(page: Page, gate: 'PDR' | 'FRR') {
   const review = button(page, 'Review release conditions')
-  if (await review.isVisible()) {
-    await review.click()
-    for (const waiver of await activeDecision(page).getByRole('checkbox').all()) await waiver.check()
-  }
+  if (await review.isVisible()) await review.click()
+  const sign = button(page, 'Risks and waivers to sign')
+  if (await sign.isVisible()) await sign.click()
+  for (const waiver of await activeDecision(page).getByRole('checkbox').all()) await waiver.check()
   await button(page, 'Submit ' + gate).click()
 }
 

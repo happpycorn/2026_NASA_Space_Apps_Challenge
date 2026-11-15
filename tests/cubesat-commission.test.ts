@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { currentEvidence, newGame, runMission, taskOptions } from '../src/game/mission'
-import { completeMission, emptyProgress, isUnlocked } from '../src/game/progress'
+import { completeMission, emptyProgress, isUnlocked, reputation } from '../src/game/progress'
 import type { Game } from '../src/game/types'
 import { commissionPlan, commissionRepairs, commissionRules } from '../src/missions/cubesat-commission'
 
@@ -72,6 +72,21 @@ test('a short pass can use all slots for the minimum and suppress the follow-up 
   assert.equal(result.flight?.capacity, 3)
   assert.equal(result.flight?.delivered, true)
   assert.equal(result.flight?.stretch, false)
+})
+
+test('a successful tidal inlet observation earns its own report while both routes fulfill the commission', () => {
+  const flight = fly(integrate(start(5, 'iss', 'pointing', 'bay')))
+  const finish = (choice: string) => runMission(flight, { type: 'segment', segment: 'commission-extra', choice, turn: 1 })
+  const pier = finish('north')
+  const inlet = finish('south')
+  for (const result of [pier, inlet]) {
+    assert.equal(result.flight?.delivered, true)
+    assert.equal(result.flight?.stretch, true)
+    assert.equal(result.flight?.batches, 4)
+    assert.equal(reputation(completeMission(emptyProgress, result)), 2)
+  }
+  assert.deepEqual(commissionRules.records?.(pier), [])
+  assert.deepEqual(commissionRules.records?.(inlet), ['cubesat:inletSurvey'])
 })
 
 test('a one-week fallback leaves time for a real retest, with no release on old evidence', () => {

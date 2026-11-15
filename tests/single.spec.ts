@@ -50,6 +50,31 @@ async function finishDelivery(page: Page, count: number, language: keyof typeof 
   for (let i = 0; i < count; i += 1) await button(page, labels[language].accept).click()
 }
 
+test('the lobby defaults to English and remembers deliberate language changes', async ({ browser }) => {
+  const page = await browser.newPage({ locale: 'zh-TW' })
+  try {
+    await page.goto('/')
+    await expect(button(page, 'Begin game')).toBeVisible()
+    if (process.env.PLAYWRIGHT_EMULATORS !== 'true') {
+      await expect(page.getByText('Room service offline')).toBeVisible()
+      await expect(button(page, 'Team review')).toHaveCount(0)
+    }
+    await page.evaluate(() => localStorage.setItem('space-mission.language', 'zh-TW'))
+    await page.reload()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+
+    await button(page, '繁中').click()
+    await page.reload()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'zh-TW')
+
+    await button(page, 'EN').click()
+    await page.reload()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+  } finally {
+    await page.close()
+  }
+})
+
 test('a legacy stretch save retains its target and design trade-offs', async ({ browser }) => {
   const page = await browser.newPage({ locale: 'zh-TW', viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' })
   try {
@@ -142,8 +167,9 @@ test('a legacy stretch save retains its target and design trade-offs', async ({ 
     await finishDelivery(page, 1)
     await expect(page.getByText('4-batch challenge met. You delivered 4 batches.')).toBeVisible()
     await expect(page.getByText(/Reinforced power added \$100,000/)).toBeVisible()
-    await button(page, 'Replay this seed').click()
-    await expect.poll(() => saved(page)).toMatchObject({ seed: 6, scienceGoal: 'stretch', week: 0 })
+    await button(page, 'Play again?').click()
+    await expect.poll(() => saved(page)).toMatchObject({ scienceGoal: 'stretch', week: 0 })
+    expect((await saved(page)).seed).not.toBe(6)
   } finally {
     await page.close()
   }

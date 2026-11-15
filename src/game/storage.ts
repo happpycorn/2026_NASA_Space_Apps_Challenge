@@ -1,6 +1,7 @@
 import type { Cost, Game, MissionRules, TimedJob } from './types'
 import { getMissionRules, missionRules } from '../missions/rules'
-import { restoreStudioSession } from './studio-session'
+import { restoreCommissionDesign } from '../missions/cubesat-commission'
+import { isTutorialStage, restoreStudioSession } from './studio-session'
 
 const key = 'space-mission.single.v2'
 const stages = ['feasibility', 'design', 'build', 'integration', 'review', 'flight', 'results']
@@ -75,7 +76,7 @@ export function readGame(): Game | null {
       || (game.event !== null && !mission.events?.some(event => event.id === game.event))
       || !validContinuation(game, mission) || mission.validSave?.(game) === false
       || !Object.entries(mission.groups).every(([group, { options }]) => Object.hasOwn(options, game.design?.[group]))) return null
-    return restoreStudioSession(game)
+    return restoreStudioSession(game.commission ? restoreCommissionDesign(game) : game)
   } catch {
     return null
   }
@@ -83,4 +84,22 @@ export function readGame(): Game | null {
 
 export function writeGame(game: Game) {
   return writeLocal(key, JSON.stringify(game))
+}
+
+const tutorialKey = 'space-mission.tutorial.v1.cubesat'
+
+export function readStudioTutorial(): Game['studioTutorial'] {
+  try {
+    const value: unknown = JSON.parse(readLocal(tutorialKey) ?? 'null')
+    return Array.isArray(value) ? [...new Set(value.filter(isTutorialStage))] : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function rememberStudioTutorial(game: Game) {
+  if (!game.commission || !game.studioTutorial?.length) return
+  const existing = readStudioTutorial() ?? []
+  const combined = [...new Set([...existing, ...game.studioTutorial])]
+  if (combined.length !== existing.length) writeLocal(tutorialKey, JSON.stringify(combined))
 }

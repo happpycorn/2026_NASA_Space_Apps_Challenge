@@ -34,7 +34,7 @@ Choose funding, technical support, or an independent plan, then work through pay
 
 Identify the plan you chose, what the tests showed, and what made it to the ground. If integration failed to decode frames from your auxiliary sensor, the report keeps that finding. If you chose to remove the sensor and passed a retest, the flight uses the final approved configuration. Some tests narrow uncertainty. Evidence applies to the configuration you verified. [NASA Systems Engineering Handbook, §5.3](https://www.nasa.gov/reference/5-3-product-verification/)
 
-Open the mission portfolio from the lobby or lunar results to see your best recorded result for each chapter and the partnership benefits you earned across attempts. To compare the effect of a different choice, replay the same seed. The same seed and actions reproduce the same result.
+Open the mission portfolio from the lobby or lunar results to see your best recorded result for each chapter and the partnership benefits you earned across attempts. On the CubeSat results screen, **Replay this commission** starts a new scenario for the same client, and **Choose another commission** returns to the commission list. In the orbital and lunar chapters, **Play again?** starts a new scenario for the same mission.
 
 ## Glossary
 

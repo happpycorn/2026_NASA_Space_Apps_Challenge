@@ -87,6 +87,28 @@
 .studio-next:empty { display: none; }
 .studio-meeting { margin-top: 12px; }
 .studio-configuration, .studio-config-options { display: grid; align-items: start; gap: 10px; }
+.studio-config-guidance, .studio-option-guidance { color: #743718; font-weight: 680; }
+.studio-config-guidance {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 3px auto 0;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: #f6e5d0;
+  overflow-wrap: anywhere;
+}
+.studio-option-guidance {
+  padding: 3px 5px;
+  border-inline-start: 2px solid #a26028;
+  background: #f6e5d0;
+  overflow-wrap: anywhere;
+}
+.studio-option-guidance[data-meets-target="true"] {
+  color: #2e5747;
+  background: #e3ede1;
+  border-inline-start-color: #407971;
+}
 .studio-tutorial-target {
   display: grid;
   gap: 8px;
@@ -95,6 +117,8 @@
   background: #fff2d8;
 }
 .studio-tutorial-target p { font-size: .86rem; line-height: 1.5; }
+.studio-tutorial-note strong { display: block; margin-bottom: 2px; color: #76471c; font-size: .78rem; }
+.studio-guide-button { justify-self: start; min-height: 44px; }
 @media (width >= 700px) {
   .studio-configuration { grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); }
   .studio-configuration .studio-preview { grid-column: 2; grid-row: 1; }

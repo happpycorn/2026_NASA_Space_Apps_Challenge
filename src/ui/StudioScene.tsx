@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { currentEvidence, currentFlightSegment, passes } from '../game/mission'
 import type { Game } from '../game/types'
 import type { Message, Translate } from '../i18n'
@@ -9,7 +9,7 @@ import { orbitalBestMargin, type OrbitalDesign } from '../missions/orbital-launc
 import { orbitalState } from '../missions/orbital-rules'
 import { drawLab } from './labArt'
 import { crew, painter, sprite, type Prop } from './pixelKit'
-import { drawStudio, type LaunchPhase, type Scene, type StudioArt } from './studioArt'
+import { drawMeetingDisplay, drawStudio, type LaunchPhase, type MeetingDisplay, type MeetingPreview, type Scene, type StudioArt } from './studioArt'
 
 export const motionQuery = '(prefers-reduced-motion: reduce)'
 export const arrivalTime = 950
@@ -74,6 +74,7 @@ const locations = {
   lab: 'labTitle', orbit: 'labOrbit', hangar: 'studioHangar', ascent: 'studioAscent', orbitalPass: 'studioOrbitalPass',
   control: 'studioControl', transfer: 'studioTransfer', descent: 'studioDescent', surface: 'studioSurface', night: 'studioNight',
   launchControl: 'studioControl', pad: 'studioLaunchPad', meeting: 'studioMeetingRoom',
+  lunarWorkshop: 'studioLunarWorkshop',
 } satisfies Record<Scene | 'lab' | 'orbit', Message>
 
 const lunarLocations: Record<string, Scene> = { launch: 'control', checkout: 'transfer', transfer: 'transfer', orbit: 'transfer',
@@ -82,7 +83,7 @@ const lunarLocations: Record<string, Scene> = { launch: 'control', checkout: 'tr
 function sceneFor(missionId: string, segment?: string): Scene | 'lab' | 'orbit' {
   if (missionId === 'cubesat') return segment ? 'orbit' : 'lab'
   if (missionId === 'orbital-launch') return segment === 'ascent' ? 'ascent' : segment ? 'orbitalPass' : 'hangar'
-  return lunarLocations[segment ?? ''] ?? 'control'
+  return lunarLocations[segment ?? ''] ?? 'lunarWorkshop'
 }
 
 export function sceneModel(missionId: string, game?: Game, briefing = false, result?: Mood) {
@@ -122,21 +123,40 @@ export function sceneModel(missionId: string, game?: Game, briefing = false, res
   }
 }
 
+const emptyScene = sceneModel('cubesat')
+
 export function StudioScene({ missionId, game, t, sequence, speaker, prop, brief, bay, result, thumbnail = false, paused = false, alert = false,
-  animationControl, meeting = false, control, launch }: {
+  animationControl, meeting = false, meetingPreview, control, launch }: {
   missionId: string; game?: Game; t: Translate; sequence?: string; speaker?: Speaker; prop?: Prop; brief?: boolean;
   bay?: boolean; result?: Mood; thumbnail?: boolean; paused?: boolean; alert?: boolean; animationControl?: ReactNode
-  meeting?: boolean; control?: 'warning' | 'released' | 'lost' | 'first-signal'; launch?: LaunchPhase
+  meeting?: boolean; meetingPreview?: MeetingPreview; control?: 'warning' | 'released' | 'lost' | 'first-signal' | 'lunar-checkout'; launch?: LaunchPhase
 }) {
   const canvas = useRef<HTMLCanvasElement>(null)
+  const meetingDisplay = useRef<MeetingDisplay | undefined>(undefined)
+  const paintedScene = useRef<string | undefined>(undefined)
   const model = sceneModel(missionId, game, brief, result)
-  const { built, tested, auxiliary, pointing, adjusted, removed, highMargin, dual, advanced, extended, alternate, lightweight, received } = model
   const scene = launch ? 'pad' : control ? 'launchControl' : meeting ? 'meeting' : model.scene
+  const { built, tested, auxiliary, pointing, adjusted, removed, highMargin, dual, advanced, extended, alternate, lightweight, received }
+    = scene === 'meeting' ? emptyScene : model
   const step = launch ?? control ?? (meeting ? 'meeting' : model.step)
   const map = (bay ?? model.bay) ? 'bay' : 'river'
   const warning = model.warning || alert
+  const sceneWarning = scene !== 'meeting' && warning
   const work = game?.studioWork
+  const lunar = missionId === 'lunar-mission'
+  const payloadReady = Boolean(game && completed(game, 'buildPayload'))
+  const groundReady = Boolean(game && completed(game, 'buildGround'))
+  const avionicsReady = Boolean(game && completed(game, 'buildAvionics'))
   const [motion, setMotion] = useState(() => !window.matchMedia(motionQuery).matches)
+  useLayoutEffect(() => {
+    if (scene !== 'meeting') return
+    const display = { preview: meetingPreview, commissionMap: game?.commission, lunar,
+      alternate: model.alternate, advanced: model.advanced, warning }
+    meetingDisplay.current = display
+    const ctx = canvas.current?.getContext('2d')
+    // Paint the monitor even when scene animation is stopped.
+    if (ctx && paintedScene.current === 'meeting') drawMeetingDisplay(ctx, display)
+  }, [scene, meetingPreview, game?.commission, lunar, model.alternate, model.advanced, warning])
   useEffect(() => {
     const query = window.matchMedia(motionQuery)
     const change = () => setMotion(!query.matches)
@@ -149,10 +169,11 @@ export function StudioScene({ missionId, game, t, sequence, speaker, prop, brief
     const animate = motion && !thumbnail && !paused && !result
     const started = performance.now()
     const paint = () => {
+      paintedScene.current = scene
       const elapsed = performance.now() - started
       const frame = animate ? Math.floor(elapsed / 130) : 0
       const progress = work ? animate ? Math.min(1, Math.max(0, (Date.now() - work.startedAt) / (work.endsAt - work.startedAt))) : .65 : 0
-      const activity = work && speaker ? { speaker, progress } : undefined
+      const activity = work && speaker ? { speaker, progress, task: work.task.replace(/^(support|lab):/, '') } : undefined
       const assembling = work?.task === 'build'
       const arrival = animate ? Math.min(1, elapsed / 650) : 1
       if (scene === 'lab' || scene === 'orbit') {
@@ -160,26 +181,29 @@ export function StudioScene({ missionId, game, t, sequence, speaker, prop, brief
           active: step === 'map' ? ['science', 'comms'] : ['science', 'power', 'comms'],
           installed: assembling ? departments.slice(0, Math.floor(progress * 4)) : built || scene === 'orbit' ? departments : [],
           assemblyStep: step === 'parts' ? 0 : built ? 2 : -1,
-          warning, orbit: scene === 'orbit', receiving: scene === 'orbit' && !warning, received, auxiliaryLens: auxiliary,
+          warning: sceneWarning, orbit: scene === 'orbit', receiving: scene === 'orbit' && !sceneWarning, received, auxiliaryLens: auxiliary,
           studio: { step, map, reporter: speaker, prop, arrival, pointing, removed, repaired: adjusted, work: activity, result },
         }, frame)
       } else {
         drawStudio(ctx, { scene, stage: step, reporter: speaker, prop, assembled: built || (thumbnail && scene === 'hangar'),
-          highMargin, dual, advanced, extended, alternate, lightweight, tested, warning, received, result, work: activity,
+          highMargin, dual, advanced, extended, alternate, lightweight, tested, warning: sceneWarning, received, result, work: activity,
+          lunar, payloadReady, groundReady, avionicsReady,
           launch: launch && { phase: launch, progress: animate ? Math.min(1, elapsed / 1700) : .55 },
-          commissionMap: game?.commission && map }, frame, arrival)
+          meetingDisplay: meetingDisplay.current }, frame, arrival)
       }
     }
     paint()
     if (!animate) return
     const timer = window.setInterval(paint, 95)
     return () => window.clearInterval(timer)
-  }, [motion, paused, sequence, scene, step, warning, built, tested, auxiliary, pointing, adjusted, removed, highMargin, dual,
-    advanced, extended, alternate, lightweight, map, received, speaker, prop, result, thumbnail, work, launch, game?.commission])
+  }, [motion, paused, sequence, scene, step, sceneWarning, built, tested, auxiliary, pointing, adjusted, removed, highMargin, dual,
+    advanced, extended, alternate, lightweight, map, received, speaker, prop, result, thumbnail, work, launch,
+    lunar, payloadReady, groundReady, avionicsReady])
 
   const label = t(locations[scene])
   return <figure className={`studio-scene${thumbnail ? ' studio-thumbnail' : ''}`} data-scene={scene} data-visual-step={step}
-    data-reporter={speaker} data-warning={warning} data-auxiliary={auxiliary} data-result={result} aria-label={thumbnail ? undefined : label}>
+    data-reporter={speaker} data-warning={warning} data-auxiliary={model.auxiliary} data-result={result}
+    data-preview-group={meetingPreview?.group} data-preview-option={meetingPreview?.option} aria-label={thumbnail ? undefined : label}>
     <canvas width={320} height={140} ref={canvas} aria-hidden="true" />
     {!thumbnail && <figcaption><span>{label}{warning && <span className="scene-warning">{t('studioWarning')}</span>}</span>{animationControl}</figcaption>}
   </figure>

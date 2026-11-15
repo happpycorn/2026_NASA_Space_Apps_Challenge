@@ -84,15 +84,17 @@ export function StoryDebrief({ game, t }: { game: Game; t: Translate }) {
 
 const earnedLabels: Record<string, Message> = {
   'cubesat:partnerVerified': 'storyRecordLab',
+  [commissions.river.southRecord]: commissions.river.southReward,
+  [commissions.bay.southRecord]: commissions.bay.southReward,
   'orbital:onTime': 'storyRecordAdvance',
   'orbital:verified': 'storyRecordSupport',
   'orbital:provenMargin': 'storyRecordMargin',
   'lunar:returnedReserve': 'storyRecordReserve',
 }
 
-export function Portfolio({ progress, t }: { progress: Progress; t: Translate }) {
+export function Portfolio({ progress, t, expanded }: { progress: Progress; t: Translate; expanded?: boolean }) {
   if (Object.keys(progress.missions).length === 0) return null
-  return <Disclosure label={t('storyPortfolio')}>
+  return <Disclosure label={t('storyPortfolio')} open={expanded}>
     <p>{t('storyPortfolioDetail')}</p>
     {missionCatalog.map(({ id, title }) => {
       const record = progress.missions[id]

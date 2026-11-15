@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import type { Game } from '../src/game/types'
+import { newGame, runMission, type Game } from '../src/game/mission'
 
 import { button, configure, enterMeeting, finishWork, firstBrief, meeting, reveal, useStudioClock, work } from './studio-controls'
 const radio = (page: Page, name: RegExp) => page.getByRole('radio', { name })
@@ -25,13 +25,13 @@ async function integrate(page: Page) {
   await work(page, /^Run integration tests/)
   await reviewConditions(page)
   await enterMeeting(page)
-  await reveal(page, 'Integration evidence')
-  await expect(page.getByText(/first transmission T\+32 min.*minimum silence 30 min/).filter({ visible: true })).toBeVisible()
+  await expect(page.locator('.studio-release').getByText(/first transmission T\+32 min.*minimum silence 30 min/)).toBeVisible()
 }
 
 async function pass(page: Page) {
   await reviewConditions(page)
   await button(page, 'Submit FRR').click()
+  await button(page, 'Launch vehicle').click()
   await button(page, 'Go to mission control').click()
   await button(page, 'Run first ground pass').click()
 }
@@ -64,6 +64,9 @@ test('a first playthrough presents the prologue, teaches each stage and launches
   await expect(page.getByText(/Rescue crews need 2 usable images/)).toBeVisible()
   await expect(lab).toHaveAttribute('data-scene', 'lab')
   await expect(button(page, 'Compare designs')).toHaveCount(0)
+  await expect(instruction).toContainText('Tutorial')
+  await expect(instruction).toContainText('Review the client’s goal, then enter the meeting')
+  await expect(button(page, 'Enter meeting')).toBeFocused()
   await enterMeeting(page)
   await expect(lab).toHaveAttribute('data-scene', 'meeting')
   await expect(instruction).toContainText(/Feasibility checks/)
@@ -107,16 +110,25 @@ test('a first playthrough presents the prologue, teaches each stage and launches
   }
   await assign(/^Confirm initial configuration/, 'assess', 4000, /Detailed design/)
   await assign(/^Freeze design/, 'freeze', 4000, /Manufacturing/)
+  await expect(button(page, 'Call a meeting')).toHaveCount(0)
   await assign(/^Build and test subsystems/, 'build', 6000, /Integration tests/)
+  await expect(button(page, 'Call a meeting')).toHaveCount(0)
   await assign(/^Run integration tests/, 'integrate', 6000, /Flight review/)
   await expect(page.getByText(/All integration checks passed/)).toBeVisible()
   await page.waitForTimeout(700)
   await lab.screenshot({ path: info.outputPath('reporting.png') })
-  await expect(page.locator('.studio-next [inert]').filter({ hasText: 'Call a meeting' })).toHaveCount(1)
+  await expect(button(page, 'Submit FRR')).toHaveCount(0)
   await reviewConditions(page)
-  await expect(button(page, 'Call a meeting')).toBeEnabled()
+  await expect(page.locator('.studio-release').getByText('Pass', { exact: true })).toHaveCount(5)
+  await expect(button(page, 'Call a meeting')).toHaveCount(0)
   await button(page, 'Submit FRR').click()
   const launch = page.locator('[data-launch-phase]')
+  await expect(launch).toHaveCount(0)
+  expect((await persisted(page)).studioAwaitLaunch).toBe(true)
+  await page.reload()
+  await button(page, 'Continue mission').click()
+  await expect(launch).toHaveCount(0)
+  await button(page, 'Launch vehicle').click()
   await expect(launch).toHaveAttribute('data-launch-phase', 'countdown')
   await expect(launch).toHaveAttribute('data-launch-phase', 'ignition')
   await expect(launch).toHaveAttribute('data-launch-phase', 'liftoff')
@@ -126,18 +138,61 @@ test('a first playthrough presents the prologue, teaches each stage and launches
   expect((await persisted(page)).studioTutorial).toEqual(['feasibility', 'design', 'build', 'integration', 'review'])
 })
 
+test('an older CubeSat save can resume and reopen the tutorial at the current stage', async ({ page }) => {
+  let game = newGame('cubesat', [], 1, 'river')
+  for (const task of ['assess', 'freeze', 'build', 'integrate']) {
+    game = runMission(game, { type: 'task', task, turn: game.log.length })
+  }
+  await page.addInitScript(save => {
+    if (!localStorage.getItem('space-mission.single.v2')) localStorage.setItem('space-mission.single.v2', save)
+  }, JSON.stringify(game))
+  await page.goto('/')
+  await button(page, 'Continue mission').click()
+  const guide = page.locator('.studio-tutorial-target')
+  await expect(guide).toContainText('Flight review checks the evidence')
+  await expect.poll(async () => (await persisted(page)).studioTutorial).toEqual(['feasibility', 'design', 'build', 'integration'])
+  await button(page, 'Review release conditions').click()
+  await expect(guide).toHaveCount(0)
+  const reviewed = await persisted(page)
+  await button(page, 'Start tutorial from this step').click()
+  await expect(guide).toContainText('Flight review checks the evidence')
+  await page.reload()
+  await button(page, 'Continue mission').click()
+  await expect(guide).toContainText('Flight review checks the evidence')
+  expect(await persisted(page)).toEqual({ ...reviewed, studioTutorial: ['feasibility', 'design', 'build', 'integration'] })
+})
+
 test('the bay commission reaches its own acceptance threshold and unlocks the next brief', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await start(page, 1, { bay: true })
   await integrate(page)
-  await button(page, 'Call a meeting').click()
-  await expect(meeting(page).getByText('Thermal imager', { exact: true })).toBeVisible()
-  await expect(meeting(page).getByText('3 required · 4 nominal downlink slots')).toBeVisible()
-  await button(page, '繁中').click()
-  await expect(meeting(page).getByText('熱像儀', { exact: true })).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  await expect(button(page, 'Call a meeting')).toHaveCount(0)
+  await reveal(page, 'Mission reference')
+  await reveal(page, 'Plans and requirements')
+  await reveal(page, 'Mission details')
+  await expect(page.locator('.studio-files summary').filter({ hasText: 'Mission brief' })).toHaveCount(0)
+  const plan = page.locator('.studio-files .plan-preview')
+  await expect(plan).toHaveAccessibleName('Design forecast')
+  await expect(plan.getByText('Thermal imager', { exact: true })).toBeVisible()
+  await expect(plan.getByText('3 required · 4 nominal downlink slots')).toBeVisible()
+  for (const language of ['EN', '繁中']) {
+    await button(page, language).click()
+    for (const width of [320, 390, 768, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 844 })
+      const metricGrid = await plan.locator('.forecast-metrics').boundingBox()
+      const delivery = await plan.locator('.forecast-delivery').boundingBox()
+      expect(delivery?.width).toBe(metricGrid?.width)
+      expect(await plan.locator('.forecast-notes').evaluate(notes => parseFloat(getComputedStyle(notes).paddingInlineStart))).toBeGreaterThan(0)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+      if (language === '繁中') {
+        await expect(plan.getByText('熱像儀', { exact: true })).toBeVisible()
+        const readings = await plan.locator('.forecast-metrics dd').nth(3).textContent()
+        expect(readings).toContain('3\u00a0批')
+        expect(readings).toContain('4\u00a0格')
+      }
+    }
+  }
   await button(page, 'EN').click()
-  await button(page, 'Return to the studio').click()
   await pass(page)
   await expect(page.getByRole('heading', { name: 'Commission fulfilled', exact: true })).toBeVisible()
   await reveal(page, 'Engineering debrief')
@@ -160,16 +215,33 @@ test('early evidence guides a correction and follow-up survives a reload', async
   await expect(page.getByText(/The client has all 2 required batches/)).toBeVisible()
   await page.reload()
   await button(page, 'Continue mission').click()
+  await expect(radio(page, /Image the northern access road/)).toHaveAccessibleName(/Reliable visibility/)
   await radio(page, /Image the southern bridge/).check()
+  await expect(radio(page, /Image the southern bridge/)).toHaveAccessibleName(/35%.*Bridge closure advisory/)
   await button(page, 'Capture and downlink follow-up').click()
   await expect(page.getByText(/relief crew rerouted heavy trucks/).first()).toBeVisible()
+  await expect(page.locator('.studio-outcome').getByText(/Bridge closure advisory/)).toBeVisible()
+  await button(page, 'Return home').click()
+  await expect(page.getByRole('heading', { name: 'Next: Orbital launch' })).toBeVisible()
+  await reveal(page, 'Mission portfolio')
+  await reveal(page, 'CubeSat')
+  await expect(page.locator('#mission-portfolio').getByText(/Bridge closure advisory/)).toBeVisible()
+  await button(page, 'View last mission results').click()
   await reveal(page, 'Engineering debrief')
   await expect(page.getByText(/offered lab time/)).toBeVisible()
-  await button(page, 'Replay this seed').click()
+  await button(page, 'Choose another commission').click()
+  await expect(radio(page, /Flood access map/)).toBeVisible()
+  await expect(radio(page, /Bay discharge survey/)).toBeVisible()
+  await button(page, 'Back to lobby').click()
+  await button(page, 'View last mission results').click()
+  await button(page, 'Replay this commission').click()
   await enterMeeting(page)
   await expect(page.getByRole('heading', { name: 'Pre-mission meeting' })).toBeVisible()
   await expect(page.locator('.studio-tutorial-target')).toHaveCount(0)
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('space-mission.single.v2')!).seed)).toBe(6)
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('space-mission.single.v2')!).seed)).not.toBe(6)
+  expect((await persisted(page)).commission).toBe('river')
+  await button(page, 'Back to lobby').click()
+  await expect(page.getByRole('heading', { name: /^In progress:/ })).toBeVisible()
 })
 
 test('late fallback fits exactly when salvaging the sensor cannot', async ({ page }) => {
@@ -177,6 +249,10 @@ test('late fallback fits exactly when salvaging the sensor cannot', async ({ pag
   await integrate(page)
   await enterMeeting(page)
   await expect(meeting(page)).toBeVisible()
+  await expect(page.locator('.studio-release').getByText('Fail', { exact: true })).toHaveCount(1)
+  await button(page, 'Submit FRR').click()
+  await expect.poll(async () => (await persisted(page)).returned).toBe(true)
+  await enterMeeting(page)
   await expect(button(page, /Rework the auxiliary interface.*2 wk.*17 cr/)).toBeDisabled()
   await work(page, /Return to the primary instrument.*1 wk.*12 cr/)
   await work(page, /Retest/)
@@ -203,6 +279,96 @@ test('a fully committed schedule misses launch when integration rejects the inte
   await expect(page.getByText(/an orbital sponsor has asked/)).not.toBeVisible()
   await expect(button(page, /Open the .* brief/)).toHaveCount(0)
 })
+
+test('the bay mass limit blocks early testing and freeze, and an older screened save can recover', async ({ page }) => {
+  await start(page, 1, { bay: true, capability: /Add an auxiliary sensor/ })
+  const observation = /^Observation capability/
+  await configure(page, observation, /Auxiliary sensor and pointing reserve/)
+  await expect(page.getByText('The satellite weighs 4.1 kg. The deployer accepts at most 4 kg.').filter({ visible: true })).toBeVisible()
+  await expect(button(page, /^Run early interface test/)).toHaveCount(0)
+  await expect(button(page, /^Freeze design/)).toHaveCount(0)
+  const room = meeting(page)
+  if (!(await room.isVisible())) await button(page, 'Return to configuration').click()
+  await expect(room.getByRole('button', { name: /^Launch and orbit.*Can improve · Mass/ })).toBeVisible()
+  await expect(room.getByRole('button', { name: /^Observation capability.*Can improve · Mass/ })).toBeVisible()
+  await room.getByRole('button', { name: observation }).click()
+  await expect(room.getByRole('radio', { name: /^Add an auxiliary sensor/ }))
+    .toHaveAccessibleName(/Mass \/ launch limit · Meets the planning target/)
+  await button(page, 'Return to the studio').click()
+  await configure(page, observation, /Add an auxiliary sensor/)
+  await work(page, /^Run early interface test/)
+  const screened = await persisted(page)
+  expect(screened.log.at(-1)?.id).toBe('screen')
+  await page.evaluate(raw => localStorage.setItem('space-mission.single.v2', raw), JSON.stringify({
+    ...screened, design: { ...screened.design, capability: 'combined' },
+  }))
+  await page.reload()
+  await button(page, 'Continue mission').click()
+  await expect(button(page, /^Freeze design/)).toHaveCount(0)
+  await button(page, 'Return to configuration').click()
+  await meeting(page).getByRole('button', { name: observation }).click()
+  await meeting(page).getByRole('radio', { name: /Add an auxiliary sensor/ }).click()
+  await expect.poll(async () => (await persisted(page)).design.capability).toBe('sensor')
+  await button(page, 'Return to the studio').click()
+  expect((await persisted(page)).log.filter(entry => entry.id === 'screen')).toHaveLength(1)
+  await integrate(page)
+  await pass(page)
+  await radio(page, /Survey the inner pier/).check()
+  await button(page, 'Capture and downlink follow-up').click()
+  expect((await persisted(page)).flight).toMatchObject({ delivered: true, primary: 3, extra: 'north' })
+  await expect(page.locator('.studio-outcome').getByText(/sheltered comparison site/)).toBeVisible()
+})
+
+test('a legacy over-limit design at week seven restores its completed early test and design resources', async ({ page }) => {
+  let game = newGame('cubesat', [], 1, 'bay')
+  game = runMission(game, { type: 'configure', design: { launch: 'iss', capability: 'sensor' } })
+  for (const task of ['assess', 'screen']) game = runMission(game, { type: 'task', task, turn: game.log.length })
+  const screened = game
+  for (const task of ['freeze', 'build', 'integrate']) game = runMission(game, { type: 'task', task, turn: game.log.length })
+  const design = { launch: 'iss', capability: 'combined' }
+  const legacy = {
+    ...game, design, week: game.week + 1, credits: game.credits - 8,
+    evidence: { ...game.evidence, design, week: 7, mass: 4.1, checks: [false, true, true, true, true] },
+    log: game.log.map(entry => entry.id === 'assess' ? entry : { ...entry, design,
+      cost: entry.cost + (entry.id === 'freeze' ? 8 : 0),
+      week: entry.week + (['build', 'integrate'].includes(entry.id) ? 1 : 0) }),
+  }
+  expect(legacy.week).toBe(7)
+  await page.addInitScript(raw => {
+    if (!localStorage.getItem('space-mission.single.v2')) localStorage.setItem('space-mission.single.v2', raw)
+  }, JSON.stringify(legacy))
+  await page.goto('/')
+  await button(page, 'Continue mission').click()
+  await expect(page.getByRole('heading', { name: 'Detailed design' })).toBeVisible()
+  await expect(page.getByText(/The satellite weighs 4.1 kg/).filter({ visible: true })).toBeVisible()
+  expect(await persisted(page)).toMatchObject({ week: screened.week, credits: screened.credits, design, evidence: null })
+  expect((await persisted(page)).log.map(entry => entry.id)).toEqual(['assess', 'screen'])
+  await button(page, 'Return to configuration').click()
+  await meeting(page).getByRole('button', { name: /^Observation capability/ }).click()
+  await meeting(page).getByRole('radio', { name: /Add an auxiliary sensor/ }).click()
+  await button(page, 'Return to the studio').click()
+  await work(page, /^Freeze design/)
+  expect((await persisted(page)).stage).toBe('build')
+})
+
+for (const route of [
+  { seed: 4, reason: /One primary observation was obscured.*4 downlink slots.*infrared/i, delivered: false, primary: 1 },
+  { seed: 4, capability: /Add an auxiliary sensor/, reason: /filled one gap.*2 usable batches in 4 slots/, delivered: true, primary: 2 },
+  { seed: 2, capability: /Reserve a pointing maneuver/, reason: /extra target was obscured/, delivered: true, primary: 2, followUp: true },
+]) {
+  test(`the main debrief shows ${route.reason.source} (seed ${route.seed})`, async ({ page }) => {
+    await start(page, route.seed, { capability: route.capability })
+    await integrate(page)
+    await pass(page)
+    if (route.followUp) {
+      await radio(page, /Image the southern bridge/).check()
+      await button(page, 'Capture and downlink follow-up').click()
+    }
+    await expect(page.locator('.studio-outcome').getByText(route.reason)).toBeVisible()
+    await expect(page.locator('.studio-outcome').getByText('Mission portfolio · Bridge closure advisory')).toHaveCount(0)
+    expect((await persisted(page)).flight).toMatchObject({ delivered: route.delivered, primary: route.primary, stretch: false })
+  })
+}
 
 test('a blocked design waits for meeting entry after reload and a saved correction settles once', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })

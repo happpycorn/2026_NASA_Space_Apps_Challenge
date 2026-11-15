@@ -1,4 +1,6 @@
-import { crew, drawCrew, map, moveToStation, painter, receiver, sprite, type CrewSprite, type Prop, type Rect, type WorkSprite } from './pixelKit'
+import { aisleDepth, crew, drawCrew, map, moveToStation, painter, receiver, sprite, type CrewSprite, type Prop, type Rect, type WorkSprite } from './pixelKit'
+import { lunarMission } from '../missions/lunar-mission'
+import { orbitalLaunch } from '../missions/orbital-launch'
 
 const ink = '#152940'
 const navy = '#223d56'
@@ -9,8 +11,20 @@ const mint = '#9dd4bd'
 const amber = '#f1bc72'
 const fault = '#e58761'
 
-export type Scene = 'hangar' | 'ascent' | 'orbitalPass' | 'control' | 'launchControl' | 'pad' | 'meeting' | 'transfer' | 'descent' | 'surface' | 'night'
+export type Scene = 'hangar' | 'lunarWorkshop' | 'ascent' | 'orbitalPass' | 'control' | 'launchControl' | 'pad' | 'meeting' | 'transfer' | 'descent' | 'surface' | 'night'
 export type LaunchPhase = 'countdown' | 'ignition' | 'liftoff'
+export type MeetingPreview = { group: string; option: string; prop: Prop; extra?: Prop }
+export type MeetingDisplay = {
+  preview?: MeetingPreview
+  commissionMap?: 'river' | 'bay'
+  lunar?: boolean
+  alternate?: boolean
+  advanced?: boolean
+  warning?: boolean
+}
+
+export const meetingDisplayBounds = { x: 84, y: 18, width: 154, height: 51 }
+
 export type StudioArt = {
   scene: Scene
   stage: string
@@ -26,9 +40,13 @@ export type StudioArt = {
   tested?: boolean
   warning?: boolean
   received?: number
-  work?: WorkSprite
+  lunar?: boolean
+  payloadReady?: boolean
+  groundReady?: boolean
+  avionicsReady?: boolean
+  work?: WorkSprite & { task: string }
   launch?: { phase: LaunchPhase; progress: number }
-  commissionMap?: 'river' | 'bay'
+  meetingDisplay?: MeetingDisplay
   result?: 'delivered' | 'short' | 'stopped'
 }
 
@@ -67,7 +85,7 @@ function workshopCrew(r: Rect, art: StudioArt, frame: number, arrival: number) {
     const station: CrewSprite = { id, x, base: 124, pose: art.work ? 'idle' : 'work', prop }
     if (art.work?.speaker === id) return moveToStation({ ...station, prop: art.prop ?? prop }, art.work, reportX, x, 124)
     const forward = !art.work && art.reporter === id ? arrival : 0
-    return forward ? { id, x: x + (reportX - x) * forward, base: 124 + 10 * forward,
+    return forward ? { id, x: x + (reportX - x) * forward, base: aisleDepth(124, 1 - forward),
       pose: forward === 1 ? 'report' : 'walk', prop: art.prop ?? prop } : station
   }), frame)
 }
@@ -91,7 +109,8 @@ function rocket(r: Rect, x: number, y: number, highMargin = false, exhaust = 0) 
   }
 }
 
-function launchPad(r: Rect, launch: NonNullable<StudioArt['launch']>, frame: number) {
+function launchPad(r: Rect, art: StudioArt, frame: number) {
+  const launch = art.launch!
   stars(r, 320, 140)
   r('#314e65', 0, 79, 320, 27)
   for (const [x, y, w] of [[0, 87, 93], [25, 80, 34], [212, 90, 108], [264, 83, 42]]) r('#415f70', x, y, w, 22)
@@ -102,7 +121,12 @@ function launchPad(r: Rect, launch: NonNullable<StudioArt['launch']>, frame: num
   for (const y of [29, 45, 61, 77, 93]) r(steel, 115, y, 10, 2)
   r(slate, 121, 42, launch.phase === 'countdown' ? 25 : 8, 3)
   const lift = launch.phase === 'liftoff' ? 92 * launch.progress ** 1.6 : 0
-  rocket(r, 147, 12 - lift, false, launch.phase === 'countdown' ? 0 : 13 + frame % 4)
+  rocket(r, 147, 12 - lift, art.highMargin, launch.phase === 'countdown' ? 0 : 13 + frame % 4)
+  if (art.lunar) {
+    r(ink, 221, 53, 43, 30)
+    r(navy, 224, 56, 37, 24)
+    sprite(r, 'moon', 232, 56, .95)
+  }
   if (launch.phase !== 'countdown') {
     const spread = launch.phase === 'liftoff' ? 15 + launch.progress * 45 : 5 + frame % 8
     for (let i = 0; i < 7; i++) {
@@ -113,6 +137,7 @@ function launchPad(r: Rect, launch: NonNullable<StudioArt['launch']>, frame: num
 }
 
 function hangar(r: Rect, art: StudioArt, frame: number, arrival: number) {
+  const showsWork = (task: string) => art.work?.task === task && art.work.progress >= .62
   r('#314c5c', 0, 0, 320, 140)
   r('#416275', 17, 13, 286, 83)
   r(navy, 100, 21, 117, 79)
@@ -140,7 +165,12 @@ function hangar(r: Rect, art: StudioArt, frame: number, arrival: number) {
   }
   r(ink, 114, 92, 84, 11)
   r(steel, 114, 91, 84, 3)
-  if (art.assembled) rocket(r, 141, 9, art.highMargin)
+  if (art.lunar) {
+    const lander = art.assembled || showsWork('buildFlight')
+    sprite(r, lander ? 'lander' : 'box', lander ? 136 : 144, lander ? 45 : 64, lander ? 1.95 : 1.2)
+    sprite(r, art.payloadReady || showsWork('buildPayload') ? art.advanced ? 'twoCameras' : 'camera' : 'data', 96, 73, .85)
+    if (lander && art.extended) sprite(r, 'battery', 181, 65, .8)
+  } else if (art.assembled || showsWork('buildStage')) rocket(r, 141, 9, art.highMargin)
   else {
     r(steel, 129, 74, 42, 16)
     r(cream, 131, 72, 37, 4)
@@ -154,6 +184,7 @@ function hangar(r: Rect, art: StudioArt, frame: number, arrival: number) {
     r(art.warning ? fault : mint, 71, 84, 26, 2)
     r(art.warning ? fault : mint, 96, 84, 2, 11)
     r(art.warning ? fault : mint, 96, 94, 41, 2)
+    if (art.work && art.work.progress >= .22) r(cream, 98 + frame % 8 * 4, 94, 3, 2)
   }
   r(ink, 21, 87, 58, 19)
   r(steel, 22, 86, 54, 3)
@@ -161,9 +192,10 @@ function hangar(r: Rect, art: StudioArt, frame: number, arrival: number) {
   if (art.tested) r(art.warning ? fault : mint, 44, 62, 16, 3)
   r(ink, 234, 83, 72, 23)
   r(steel, 234, 81, 72, 4)
-  receiver(r, 238, 59)
+  if (!art.lunar || art.groundReady || showsWork('buildGround')) receiver(r, 238, 59, true)
+  else sprite(r, 'box', 239, 69, .85)
   if (art.dual) receiver(r, 267, 59)
-  if (art.advanced) sprite(r, 'data', 287, 69, .6)
+  if (!art.lunar && (art.avionicsReady || showsWork('buildAvionics'))) sprite(r, art.advanced ? 'archive' : 'data', 287, 69, .75)
   workshopCrew(r, art, frame, arrival)
 }
 
@@ -244,7 +276,10 @@ function control(r: Rect, art: StudioArt, frame: number, arrival: number) {
   r(ink, 86, 12, 149, 67)
   stars(r, 143, 59, 89, 15)
   for (let i = 0; i < 19; i += 1) r(steel, 103 + i * 5, 65 - Math.floor(Math.sin(i / 8) * (art.alternate ? 34 : 15)), 2, 1)
-  if (launch) sprite(r, art.warning ? 'signal' : art.stage === 'first-signal' ? 'orbit' : 'rocket', 151, 26, 1.7)
+  if (launch) {
+    const icon = art.stage === 'lunar-checkout' ? 'lander' : art.warning ? 'signal' : art.stage === 'first-signal' ? 'orbit' : 'rocket'
+    sprite(r, icon, 151, 26, 1.7)
+  }
   else {
     sprite(r, 'moon', 183, 28, 1.8)
     sprite(r, 'lander', 128, 36, 1.05)
@@ -269,7 +304,117 @@ function control(r: Rect, art: StudioArt, frame: number, arrival: number) {
   workshopCrew(r, art, frame, arrival)
 }
 
-function meetingRoom(r: Rect, art: StudioArt, frame: number, arrival: number) {
+function displayEarth(r: Rect, x: number, y: number) {
+  r('#477a8e', x - 8, y - 11, 16, 22)
+  r('#477a8e', x - 11, y - 7, 22, 14)
+  r(mint, x - 9, y - 6, 8, 5)
+  r(mint, x - 3, y - 2, 6, 3)
+  r('#6b9f9b', x + 3, y + 3, 6, 5)
+  r(cream, x - 4, y - 11, 8, 2)
+}
+
+function displayOrbit(r: Rect, option: string) {
+  const orbit = orbitalLaunch.orbits[option as keyof typeof orbitalLaunch.orbits]
+  const angle = orbit.inclination * Math.PI / 180
+  const radius = 20 * orbit.altitudeKm / orbitalLaunch.orbits.low.altitudeKm
+  const color = option === 'sso' ? amber : mint
+  displayEarth(r, 161, 44)
+  for (let i = 0; i < 108; i++) {
+    const time = i * 2 * Math.PI / 108
+    const major = radius * Math.cos(time)
+    const minor = radius * .62 * Math.sin(time)
+    r(i < 54 ? color : '#658892', 161 + major * Math.cos(angle) - minor * Math.sin(angle),
+      44 + .82 * (major * Math.sin(angle) + minor * Math.cos(angle)), 2, 2)
+  }
+  const altitude = Math.round(radius)
+  r(slate, 204, 55, 27, 4)
+  r(color, 204, 55, altitude, 2)
+}
+
+function displayLunarRoute(r: Rect, alternate = false) {
+  displayEarth(r, 105, 51)
+  sprite(r, 'moon', 200, 20, 1.4)
+  for (let i = 1; i < 27; i++) {
+    const t = i / 27
+    const y = 51 - 16 * t - Math.sin(t * Math.PI) * (alternate ? 21 : 2)
+    r(alternate ? amber : mint, 117 + 3 * i, y, 2, 2)
+  }
+}
+
+function displayPower(r: Rect, option: string) {
+  const night = lunarMission.powers[option as keyof typeof lunarMission.powers].nightWindows
+  const day = lunarMission.daylightWindows
+  sprite(r, 'sun', 109, 22, 1.15)
+  sprite(r, 'moon', 197, 22, 1.1)
+  if (night) sprite(r, 'battery', 163, 25, 1.1)
+  for (let i = 0; i < day + lunarMission.powers.extended.nightWindows; i++) {
+    r(i < day ? mint : i < day + night ? amber : slate, 103 + 24 * i, 55, 21, 6)
+  }
+}
+
+export function drawMeetingDisplay(ctx: CanvasRenderingContext2D, display: MeetingDisplay = {}) {
+  const { x, y, width, height } = meetingDisplayBounds
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(x, y, width, height)
+  ctx.clip()
+  const r = painter(ctx)
+  const { preview, commissionMap, lunar, alternate, advanced, warning } = display
+  r(navy, x, y, width, height)
+  for (let column = 91; column < 235; column += 8) {
+    for (let row = 21; row < 68; row += 8) r(slate, column, row, 1, 1)
+  }
+  if (commissionMap) map(r, commissionMap, 90, 22, 74, 43, true)
+  if (!preview) {
+    if (lunar) displayLunarRoute(r, alternate)
+    else {
+      if (!commissionMap) sprite(r, advanced ? 'archive' : 'orbit', 104, 22, 1.65)
+      for (const y of [28, 41, 54]) {
+        r(steel, 173, y, 6, 5)
+        r(warning && y === 41 ? fault : mint, 183, y + 1, y === 41 ? 42 : 29, 2)
+        r(slate, 183, y + 4, 20, 1)
+      }
+    }
+  } else if (preview.group === 'launch' && preview.extra) {
+    sprite(r, preview.extra, 172, 20, 1.9)
+  } else if (preview.group === 'capability') {
+    sprite(r, preview.prop, 168, 25, 1.4)
+    if (preview.extra) sprite(r, preview.extra, 203, 34, 1.25)
+  } else if (preview.group === 'orbit') {
+    displayOrbit(r, preview.option)
+  } else if (preview.group === 'ground') {
+    const stations = preview.option === 'dual' ? [105, 186] : [145]
+    for (const x of stations) receiver(r, x, 38)
+    const { capacity } = orbitalLaunch.grounds[preview.option as keyof typeof orbitalLaunch.grounds]
+    for (let i = 0; i < capacity; i++) r(mint, 161 - capacity * 5 + i * 10, 28, 6, 3)
+  } else if (preview.group === 'route') {
+    displayLunarRoute(r, preview.option === 'lowEnergy')
+  } else if (preview.group === 'power') {
+    displayPower(r, preview.option)
+  } else if (preview.group === 'stage') {
+    const scaled: Rect = (color, x, y, width, height) => r(color, 144 + x * .48, 22 + y * .48,
+      Math.max(1, Math.round(width * .48)), Math.max(1, Math.round(height * .48)))
+    const upgraded = preview.option === 'highMargin'
+    rocket(scaled, 0, 0, upgraded)
+    const { capacityKg } = orbitalLaunch.stages[preview.option as keyof typeof orbitalLaunch.stages]
+    r(upgraded ? amber : mint, 174, 52, Math.round(capacityKg / 3), 3)
+  } else if (preview.group === 'adapter' || preview.group === 'mount') {
+    const light = preview.option === 'lightweight'
+    for (const y of light ? [49] : [39, 49, 59]) r(light ? amber : mint, 108, y, 49, 3)
+    sprite(r, preview.prop, 170, 22, 1.75)
+  } else if (lunar && preview.group === 'payload') {
+    sprite(r, 'lander', 109, 21, 1.9)
+    sprite(r, preview.prop, 175, 23, 1.8)
+  } else {
+    sprite(r, preview.prop, preview.extra ? 110 : 139, 23, 1.7)
+    if (preview.extra) sprite(r, preview.extra, 172, 23, 1.7)
+  }
+  if (warning) r(fault, 227, 22, 6, 2)
+  ctx.restore()
+}
+
+function meetingRoom(ctx: CanvasRenderingContext2D, art: StudioArt, frame: number, arrival: number) {
+  const r = painter(ctx)
   r('#dedfd1', 0, 0, 320, 140)
   r('#f0eee0', 0, 0, 320, 11)
   r('#c4c9ba', 0, 76, 320, 3)
@@ -286,14 +431,7 @@ function meetingRoom(r: Rect, art: StudioArt, frame: number, arrival: number) {
   r(steel, 265, 65, 8, 2)
   r('#879c95', 78, 18, 166, 62)
   r(ink, 79, 13, 164, 61)
-  r(navy, 84, 18, 154, 51)
-  if (art.commissionMap) map(r, art.commissionMap, 90, 22, 73, 43, true)
-  else sprite(r, art.advanced ? 'archive' : 'orbit', 104, 21, 1.7)
-  for (const y of [28, 41, 54]) {
-    r('#769b99', 173, y, 6, 5)
-    r(art.warning && y === 41 ? fault : mint, 183, y + 1, y === 41 ? 42 : 29, 2)
-    r('#647f85', 183, y + 4, 20, 1)
-  }
+  drawMeetingDisplay(ctx, art.meetingDisplay)
   r('#a0ab9e', 80, 111, 159, 11)
   r(ink, 91, 101, 6, 19)
   r(ink, 224, 101, 6, 19)
@@ -301,7 +439,7 @@ function meetingRoom(r: Rect, art: StudioArt, frame: number, arrival: number) {
   r('#769298', 78, 81, 163, 17)
   r('#a3b5ad', 78, 81, 163, 3)
   sprite(r, 'data', 130, 77, .8)
-  sprite(r, art.warning ? 'scale' : 'contract', 162, 76, .8)
+  sprite(r, 'contract', 162, 76, .8)
   const seats = [{ id: 'science', x: 49, base: 116, prop: 'map' }, { id: 'power', x: 114, base: 128, prop: 'data' },
     { id: 'comms', x: 247, base: 117, prop: 'signal' }] as const
   drawCrew(r, seats.map(({ id, x, base, prop }): CrewSprite => {
@@ -313,9 +451,9 @@ function meetingRoom(r: Rect, art: StudioArt, frame: number, arrival: number) {
 
 export function drawStudio(ctx: CanvasRenderingContext2D, art: StudioArt, frame: number, arrival: number) {
   const r = painter(ctx)
-  if (art.scene === 'pad' && art.launch) launchPad(r, art.launch, frame)
-  else if (art.scene === 'meeting') meetingRoom(r, art, frame, arrival)
-  else if (art.scene === 'hangar') hangar(r, art, frame, arrival)
+  if (art.scene === 'pad' && art.launch) launchPad(r, art, frame)
+  else if (art.scene === 'meeting') meetingRoom(ctx, art, frame, arrival)
+  else if (art.scene === 'hangar' || art.scene === 'lunarWorkshop') hangar(r, art, frame, arrival)
   else if (art.scene === 'control' || art.scene === 'launchControl') control(r, art, frame, arrival)
   else flight(r, art, frame, arrival)
 }

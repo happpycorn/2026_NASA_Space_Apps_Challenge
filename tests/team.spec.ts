@@ -6,7 +6,7 @@ async function host(page: Page) {
   await page.goto('/')
   await page.getByRole('button', { name: 'Team review' }).click()
   await page.getByRole('button', { name: 'Create room as PM' }).click()
-  const code = page.locator('.resource-line > div').filter({ hasText: 'Room code' }).locator('dd')
+  const code = page.locator('.room-code-display code')
   await expect(code).toHaveText(/^[A-Z2-9]{8}$/)
   return (await code.textContent())!
 }
@@ -24,14 +24,18 @@ test.describe('Firebase emulator', () => {
   test.setTimeout(60_000)
 
   test('separate identities join, revise, confirm once and recover the localized result', async ({ browser }) => {
-    const hostContext = await browser.newContext({ locale: 'en-US' })
+    const hostContext = await browser.newContext({ locale: 'en-US', permissions: ['clipboard-read', 'clipboard-write'] })
     const guestContext = await browser.newContext({ locale: 'en-US', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
     const pm = await hostContext.newPage()
     const guest = await guestContext.newPage()
     try {
       const code = await host(pm)
+      await pm.getByRole('button', { name: 'Copy room code' }).click()
+      await expect(pm.getByRole('status').filter({ hasText: 'Room code copied.' })).toBeVisible()
+      const copied = await pm.evaluate(() => navigator.clipboard.readText())
+      expect(copied).toBe(code)
       await expect(pm.getByRole('button', { name: 'Confirm and retest' })).toBeDisabled()
-      await join(guest, code)
+      await join(guest, copied)
       await guest.getByRole('button', { name: 'Science Open' }).click()
       await expect(guest.locator('.proposal-panel .report-speaker').filter({ hasText: /^Science$/ })).toBeVisible()
       await expect(guest.getByRole('button', { name: 'Confirm and retest' })).toHaveCount(0)

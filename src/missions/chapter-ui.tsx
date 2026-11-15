@@ -8,7 +8,7 @@ import { currentEvidence } from '../game/mission'
 import { approvedWeek, completed, nextDefectCopy, severityMessage } from './chapter'
 import { flyOrbital, orbitalCapacity, orbitalShortfall, orbitalCarried, orbitalDegradedCapacity, orbitalLaunch as orbital, orbitalLinkMaturity, orbitalNextStep, orbitalOdds, orbitalRiskIds, orbitalRisks, type OrbitalDesign } from './orbital-launch'
 import { orbitalPlan, orbitalRecords, orbitalRules, orbitalState } from './orbital-rules'
-import { lunarAllocation, lunarBudgetForecast, lunarDesign, lunarDiagnosticRecords, lunarFlightRevised, lunarPlanCost, lunarRules, lunarState, lunarStates, massBudget } from './lunar-rules'
+import { lunarAllocation, lunarBudgetForecast, lunarDesign, lunarFlightRevised, lunarPlanCost, lunarRules, lunarState, lunarStates, massBudget } from './lunar-rules'
 import { lunarItemId, lunarMaturity, lunarMission as lunar, lunarOdds, lunarPlanBatches, lunarRisks, lunarVerified, type LunarFlightResult } from './lunar-mission'
 
 // Frames a low forecast: it reflects what has been checked, not a verdict on the lander.
@@ -134,7 +134,6 @@ function LunarDebrief({ game, t }: { game: Game; t: Translate }) {
     {state.secondPayload && !flight?.secondPayloadUsable && <p>{t('lunarHostedPending')}</p>}
     {state.governmentCold && <p>{t(lunar.tags.distant)}</p>}
     {flight?.engineering && <p>{t(lunar.tags.engineering)}</p>}
-    {lunarDiagnosticRecords(game).length > 0 && <p>{t('lunarDiagnosticReplay')}</p>}
     {flight?.cruiseData && <p>{t(lunar.tags.cruiseData)}</p>}
     {flight?.siteConfirmed && <p>{t(lunar.tags.siteConfirmed)}</p>}
     {flight?.protectionOff && <p>{t('lunarDebriefProtectionOff')}</p>}
@@ -227,10 +226,10 @@ function LunarPreview({ game, t }: { game: Game; t: Translate }) {
     </p>
     <p>{t('lunarRouteBudget', { correction: route.correctionKg, propellant: route.propellantKg,
       week: game.deadline - route.leadWeeks, allocation: lunarAllocation(game) })}</p>
+    <p>{t('studioLunarDeliveryPlan', { count: lunarPlanBatches(d, 'extra', lunar.daylightWindows + lunar.powers[d.power].nightWindows).batches })}</p>
     {(completed(game, 'trade') || completed(game, 'prelim')) && game.stage === 'design' && <>
       <p>{t('lunarTradeMount', { min: lunar.mounts.lightweight.growthKg, max: lunar.mounts.standard.growthKg })}</p>
       <p>{t('lunarTradeRoute', { propellant: lunar.routes.direct.propellantKg - lunar.routes.lowEnergy.propellantKg, weeks: lunar.routes.lowEnergy.leadWeeks })}</p>
-      <p>{t('lunarTradeData', { count: lunarPlanBatches(d, 'extra', lunar.daylightWindows + lunar.powers[d.power].nightWindows).batches })}</p>
     </>}
   </>
 }

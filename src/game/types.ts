@@ -118,7 +118,8 @@ export type Game = {
   missionState?: JsonObject
   flightProgress?: FlightProgress
   studioWork?: { task: string; turn: number; startedAt: number; endsAt: number; review?: boolean }
-  studioLaunch?: { startedAt: number }
+  studioAwaitLaunch?: true
+  studioLaunch?: { startedAt: number; choice?: string }
   studioTutorial?: Stage[]
 }
 

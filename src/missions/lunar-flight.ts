@@ -11,6 +11,7 @@ function replay({ game, progress }: FlightContext, id: string, decisions: string
   const simulation = lunarFlight(game.seed, {
     design: lunarDesign(game), states: lunarStates(game), marginKg: massBudget(game, true).margin,
     credits: game.credits, revised: lunarFlightRevised(game), responseReserves: state.responseReserves, secondPayload: state.secondPayload, icd: state.icd ?? undefined,
+    legacyLaunchOrder: progress.state.legacyLaunchOrder === true,
   })
   let next = simulation.next()
   let step = 0
@@ -126,10 +127,14 @@ const segments: FlightSegment[] = mission.segments.map(segment => {
       }
       const nextDecisions = choice === null ? decisions : [...decisions, choice]
       const next = replay(context, id, nextDecisions)
-      if (next.imaging || next.decision) return { continued: true, report, state: { decisions: nextDecisions } }
+      const nextState = { ...context.progress.state, decisions: nextDecisions }
+      // A ground response clears the event. The launch segment still awaits countdown.
+      const groundResponse = id === 'launch' && choice !== null && next.boundary?.segment === 'checkout'
+        && context.progress.state.legacyLaunchOrder !== true
+      if (next.imaging || next.decision || groundResponse) return { continued: true, report, state: nextState }
       return {
         end: Boolean(next.result), report: report ?? reportFor(id, next.result),
-        state: { decisions: nextDecisions, ...(next.result && { result: next.result }) },
+        state: { ...nextState, ...(next.result && { result: next.result }) },
       }
     },
   }

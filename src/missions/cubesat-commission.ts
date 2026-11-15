@@ -7,10 +7,12 @@ import { cubeSat } from './cubesat'
 export const commissions = {
   river: { name: 'commissionRiver', brief: 'commissionRiverBrief', instrument: 'commissionOptical',
     auxiliary: 'commissionInfrared', delivered: 'commissionRiverDelivered', north: 'commissionRiverNorth', south: 'commissionRiverSouth',
-    northImpact: 'commissionRiverNorthImpact', southImpact: 'commissionRiverSouthImpact', required: 2, watts: 3, kg: 0.4, cost: 14 },
+    northImpact: 'commissionRiverNorthImpact', southImpact: 'commissionRiverSouthImpact', southReward: 'commissionRiverSouthReward',
+    southRecord: 'cubesat:bridgeAdvisory', required: 2, watts: 3, kg: 0.4, cost: 14 },
   bay: { name: 'commissionBay', brief: 'commissionBayBrief', instrument: 'commissionThermal',
     auxiliary: 'commissionVisible', delivered: 'commissionBayDelivered', north: 'commissionBayNorth', south: 'commissionBaySouth',
-    northImpact: 'commissionBayNorthImpact', southImpact: 'commissionBaySouthImpact', required: 3, watts: 4, kg: 0.5, cost: 17 },
+    northImpact: 'commissionBayNorthImpact', southImpact: 'commissionBaySouthImpact', southReward: 'commissionBaySouthReward',
+    southRecord: 'cubesat:inletSurvey', required: 3, watts: 4, kg: 0.5, cost: 17 },
 } as const
 
 export type CommissionId = keyof typeof commissions
@@ -38,6 +40,7 @@ const costs = {
 } satisfies Record<string, CostItem>
 
 const mainline = ['assess', 'freeze', 'build', 'integrate'] as const
+const extraObstructionChance = 0.35
 export const capabilityFor = (design: Design) => capabilities[design.capability as keyof typeof capabilities]
 const launchFor = (design: Design) => launches[design.launch as keyof typeof launches]
 const effectiveDeadline = (game: Game, design = game.design) => game.deadline - launchFor(design).lead
@@ -54,6 +57,30 @@ export function commissionForecast(game: Game, design = game.design) {
   // The auxiliary exposure is scheduled outside a transmit slot.
   const peak = cubeSat.busWatts + Math.max(client.watts + cubeSat.downlinkWatts, capability.backup ? 6 : 0)
   return { mass, massLimit: launch.limit, peak, available: 10, required: client.required, capacity: launch.capacity, deadline: effectiveDeadline(game, design) }
+}
+
+export function commissionLimits(plan: ReturnType<typeof commissionForecast>): Copy[] {
+  const issues: Copy[] = []
+  if (plan.mass > plan.massLimit) issues.push({ message: 'massFinding', values: { mass: plan.mass, limit: plan.massLimit } })
+  if (plan.peak > plan.available) issues.push({ message: 'commissionPowerBlock', values: { peak: plan.peak, available: plan.available } })
+  return issues
+}
+
+export function commissionCanConfigure(game: Game) {
+  return game.stage !== 'design' || !screened(game) || commissionLimits(commissionForecast(game)).length > 0
+}
+
+export function restoreCommissionDesign(game: Game): Game {
+  if (game.missionId !== cubeSat.id || !['build', 'integration', 'review'].includes(game.stage) || !screened(game)
+    || commissionLimits(commissionForecast(game)).length === 0) return game
+  const freeze = game.log.findIndex(entry => entry.id === 'freeze' && !entry.incomplete)
+  if (freeze < 1) return game
+  // Older versions let a screened design pass CDR over the deployer limit.
+  const log = game.log.slice(0, freeze)
+  const refunded = game.log.slice(freeze).reduce((total, entry) => total + entry.cost, 0)
+  const { studioWork: _invalidWork, ...design } = game
+  return { ...design, log, stage: 'design', gate: 'PDR', returned: false, evidence: null,
+    week: log.at(-1)!.week, credits: game.credits + refunded }
 }
 
 function mainCost(game: Game, id: typeof mainline[number], design = game.design): Cost {
@@ -82,14 +109,15 @@ export function commissionRepairs(game: Game) {
   const fallback = { ...game.design, capability: 'baseline' }
   const fallbackPlan = commissionPlan(game, fallback)
   const current = commissionPlan(game)
-  const currentFitsMass = current.mass <= current.massLimit
+  const currentFits = commissionLimits(current).length === 0
   const fix = late ? 'correctLate' : 'correctEarly'
   return [
     { id: fix, cost: costs[fix], weeks: costs[fix].weeks + retest.weeks, credits: costs[fix].credits + retest.credits,
-      eligible: currentFitsMass && (late ? game.evidence?.auxPass === false : openFinding(game)),
+      eligible: currentFits && (late ? game.evidence?.auxPass === false : openFinding(game)),
       fits: current.spareWeeks >= costs[fix].weeks + retest.weeks && current.spareCredits >= costs[fix].credits + retest.credits },
     { id: 'strip' as const, cost: costs.strip, weeks: retest.weeks, credits: costs.strip.credits + retest.credits,
-      eligible: capabilityFor(game.design).backup && (late ? !currentFitsMass || game.evidence?.auxPass === false : openFinding(game)),
+      eligible: capabilityFor(game.design).backup && commissionLimits(fallbackPlan).length === 0
+        && (late ? !currentFits || game.evidence?.auxPass === false : openFinding(game)),
       fits: fallbackPlan.spareWeeks >= retest.weeks && fallbackPlan.spareCredits >= costs.strip.credits + retest.credits },
   ].filter(item => item.eligible)
 }
@@ -129,17 +157,20 @@ export const commissionRules: MissionRules = {
   },
   costs,
   tasks: {
-    assess: { plan: game => game.stage === 'feasibility' ? costs.assess : null,
+    assess: { plan: game => game.stage === 'feasibility' && !commissionLimits(commissionForecast(game)).length ? costs.assess : null,
       complete: game => ({ ...game, stage: 'design', gate: 'PDR' }) },
     screen: { plan: game => {
       if (game.stage !== 'design' || screened(game) || !capabilityFor(game.design).backup) return null
       const plan = commissionPlan(game)
-      return plan.spareWeeks >= costs.screen.weeks && plan.spareCredits >= costs.screen.credits ? costs.screen : null
+      return !commissionLimits(plan).length && plan.spareWeeks >= costs.screen.weeks && plan.spareCredits >= costs.screen.credits ? costs.screen : null
     }, complete: game => game, detail: game => ({ message: interfaceFault(game) ? 'commissionScreenFound' : 'commissionScreenClear' }) },
     correctEarly: { plan: game => game.stage === 'design' && commissionRepairs(game).some(item => item.id === 'correctEarly' && item.fits) ? costs.correctEarly : null,
       complete: game => game, detail: () => ({ message: 'commissionEarlyCorrected' }) },
-    freeze: { plan: game => game.stage === 'design' && !(capabilityFor(game.design).backup && openFinding(game))
-      && commissionPlan(game).spareCredits >= 0 && commissionPlan(game).spareWeeks >= 0 ? mainCost(game, 'freeze') : null, complete: freezeDesign },
+    freeze: { plan: game => {
+      if (game.stage !== 'design' || (capabilityFor(game.design).backup && openFinding(game))) return null
+      const plan = commissionPlan(game)
+      return !commissionLimits(plan).length && plan.spareCredits >= 0 && plan.spareWeeks >= 0 ? mainCost(game, 'freeze') : null
+    }, complete: freezeDesign },
     build: { plan: game => game.stage === 'build' ? mainCost(game, 'build') : null, complete: game => ({ ...game, stage: 'integration' }) },
     integrate: { plan: game => game.stage === 'integration' && !game.evidence ? costs.integrate : null, complete: integrate },
     correctLate: { plan: game => game.returned && commissionRepairs(game).some(item => item.id === 'correctLate' && item.fits) ? costs.correctLate : null,
@@ -149,7 +180,7 @@ export const commissionRules: MissionRules = {
         : reviseDesign(game, { ...game.design, capability: 'baseline' }), detail: () => ({ message: 'commissionStripped' }) },
     retest: { plan: game => game.stage === 'integration' && game.evidence ? costs.retest : null, complete: integrate },
   },
-  configure: (game, design) => game.stage === 'design' && screened(game) ? game : { ...game, design },
+  configure: (game, design) => commissionCanConfigure(game) ? { ...game, design } : game,
   stageDetails: { feasibility: 'commissionIntro', design: 'commissionDesign', build: 'buildDetail', integration: 'integrationDetail',
     review: 'reviewDetail', flight: 'commissionFirstPass' },
   outcomes: { stopped: 'outcomeStopped', extra: 'outcomeExtra', success: 'outcomeSuccess', partial: 'outcomePartial' },
@@ -159,8 +190,9 @@ export const commissionRules: MissionRules = {
       const issues: { detail: Copy }[] = []
       if (!evidence) issues.push({ detail: { message: 'evidenceRetestWhy' } })
       if (evidence && !evidence.checks[0]) issues.push({ detail: { message: 'massFinding', values: { mass: evidence.mass, limit: evidence.massLimit } } })
+      if (evidence && !evidence.checks[1]) issues.push({ detail: { message: 'commissionPowerBlock', values: { peak: evidence.peak, available: evidence.available } } })
       if (evidence?.auxPass === false) issues.push({ detail: { message: 'commissionInterfaceFailed' } })
-      if (evidence && [1, 3, 4].some(index => !evidence.checks[index])) issues.push({ detail: { message: 'commissionReleaseBlocked' } })
+      if (evidence && [3, 4].some(index => !evidence.checks[index])) issues.push({ detail: { message: 'commissionReleaseBlocked' } })
       return { issues, approve: { message: 'chapterFrrApproved' }, return: { message: 'commissionReleaseBlocked' } }
     },
   },
@@ -171,8 +203,13 @@ export const commissionRules: MissionRules = {
     return repairs.some(item => item.credits <= game.credits) ? 'deadline' : 'funds'
   },
   validSave: game => Boolean(game.commission && Object.hasOwn(commissions, game.commission)),
-  records: game => game.flight?.delivered && currentEvidence(game)?.checks.every(Boolean)
-    && capabilityFor(game.design).backup ? ['cubesat:partnerVerified'] : [],
+  records: game => {
+    if (!game.flight?.delivered) return []
+    const records: string[] = []
+    if (currentEvidence(game)?.checks.every(Boolean) && capabilityFor(game.design).backup) records.push('cubesat:partnerVerified')
+    if (game.flight.extra === 'south') records.push(commissionFor(game).southRecord)
+    return records
+  },
   segmentedFlight: {
     segments: [
       {
@@ -190,10 +227,12 @@ export const commissionRules: MissionRules = {
           slots: Number(progress.state.capacity) - Number(progress.state.batches) } }),
         choices: ({ game }) => [
           { id: 'north', label: commissionFor(game).north, detail: { message: 'commissionNorthRisk' } },
-          { id: 'south', label: commissionFor(game).south, detail: { message: 'commissionSouthRisk' } },
+          { id: 'south', label: commissionFor(game).south,
+            detail: { message: 'commissionSouthRisk', values: { chance: extraObstructionChance * 100 } },
+            consequence: { message: commissionFor(game).southReward } },
         ],
         resolve: ({ game, progress }, choice) => {
-          const success = choice === 'north' || itemRandom(game.seed, `cubesat:${game.commission}:extra`) >= 0.35
+          const success = choice === 'north' || itemRandom(game.seed, `cubesat:${game.commission}:extra`) >= extraObstructionChance
           return { state: { ...progress.state, extra: success ? choice : null },
             report: { message: success ? choice === 'north' ? commissionFor(game).northImpact : commissionFor(game).southImpact : 'commissionExtraObstructed' } }
         },

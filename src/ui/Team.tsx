@@ -142,6 +142,16 @@ export default function Team({ t, back }: { t: Translate; back: () => void }) {
   const [busy, setBusy] = useState(false)
   const [online, setOnline] = useState(false)
   const [error, setError] = useState<Message | null>(null)
+  const [copyStatus, setCopyStatus] = useState<{ code: string; message: 'roomCodeCopied' | 'roomCodeCopyFailed' }>()
+
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopyStatus({ code, message: 'roomCodeCopied' })
+    } catch {
+      setCopyStatus({ code, message: 'roomCodeCopyFailed' })
+    }
+  }
 
   useEffect(() => {
     if (!code) return
@@ -217,10 +227,13 @@ export default function Team({ t, back }: { t: Translate; back: () => void }) {
     {room && <>
       {!online && <p role="status" className="notice">{t('roomOffline')}</p>}
       <dl className="resource-line">
-        <div><dt>{t('roomCode')}</dt><dd>{code}</dd></div>
+        <div className="room-code-display"><dt>{t('roomCode')}</dt><dd><code>{code}</code></dd>
+          <dd><button className="button secondary" type="button" onClick={() => void copyCode()}>{t('copyRoomCode')}</button></dd>
+        </div>
         <div><dt>{t('flightWindow')}</dt><dd>{t('weeks', { count: cubeSat.deadline - baseWeek - (result?.weeks ?? 0) })}</dd></div>
         <div><dt>{t('budgetLabel')}</dt><dd>{money(baseBudget - (result?.credits ?? 0))}</dd></div>
       </dl>
+      {copyStatus?.code === code && <p role="status">{t(copyStatus.message)}</p>}
       <div className="next-decision">
         {room.decision ? <RoomResult room={room} t={t} /> : <>
           {!role && <RolePicker room={room} t={t} disabled={disabled}

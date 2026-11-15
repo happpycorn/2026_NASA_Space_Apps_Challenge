@@ -1,11 +1,11 @@
 import { orbitalCapacity, orbitalCarried, orbitalDegradedCapacity, orbitalLaunch, orbitalRisks, type OrbitalDesign } from '../missions/orbital-launch'
-import { lunarMission } from '../missions/lunar-mission'
-import { lunarCorrection, lunarDesign, lunarPlanCost, massBudget } from '../missions/lunar-rules'
+import { lunarMission, lunarPlanBatches } from '../missions/lunar-mission'
+import { lunarAllocation, lunarBudgetForecast, lunarCorrection, lunarDesign, lunarPlanCost, massBudget } from '../missions/lunar-rules'
 import { orbitalCorrection, orbitalPlanCost, orbitalState } from '../missions/orbital-rules'
-import { commissionFor, commissionPlan, commissionRepairs, commissions, type CommissionId } from '../missions/cubesat-commission'
-import { CommissionNote, CommissionOption, CommissionPlan, deliveryEstimate } from '../missions/cubesat-commission-ui'
+import { commissionCanConfigure, commissionFor, commissionLimits, commissionPlan, commissionRepairs, commissions, type CommissionId } from '../missions/cubesat-commission'
+import { CommissionDeliveryFeedback, CommissionNote, CommissionOption, CommissionPlan, deliveryEstimate } from '../missions/cubesat-commission-ui'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { StudioAction } from '../game/studio-session'
+import { studioReadyToLaunch, usesStudio, type StudioAction } from '../game/studio-session'
 import { readLocal, writeLocal } from '../game/storage'
 import { fundingReduced, missionSpending, nextMission, type Progress } from '../game/progress'
 import {
@@ -26,12 +26,13 @@ import { Lab } from './Lab'
 import { OptionArt, StudioAnimationButton, StudioBubble, StudioScene,
   sceneModel, stoppedStage, type Illustration, type Speaker } from './StudioScene'
 import { StudioDecision, choiceIllustration, designIllustration, taskIllustration } from './StudioDecision'
-import { StudioLaunch, TutorialTarget } from './StudioFlow'
+import { StudioLaunch, studioTutorialMessage, TutorialNote, TutorialTarget } from './StudioFlow'
 import type { Prop } from './pixelKit'
+import type { MeetingPreview } from './studioArt'
 import type { Cost, Design } from '../game/types'
 import { Portfolio, StoryBrief, StoryDebrief } from './Story'
 
-type Props = { game: Game; mission: MissionModule; progress: Progress; t: Translate; send: (action: StudioAction) => void; back: () => void; replay: (sameSeed: boolean, goal?: ScienceGoal) => void; open: (missionId: string) => void; languageControls?: ReactNode }
+type Props = { game: Game; mission: MissionModule; progress: Progress; t: Translate; send: (action: StudioAction) => void; back: () => void; replay: () => void; open: (missionId: string) => void; languageControls?: ReactNode }
 type Controls = Pick<Props, 'game' | 'mission' | 't' | 'send'>
 
 const goalBatches = (goal?: ScienceGoal) => goal === 'stretch' ? cubeSat.stretchBatches : cubeSat.minimumBatches
@@ -182,11 +183,14 @@ function CubeSatForecast({ game, mission, t }: Pick<Controls, 'game' | 'mission'
 }
 
 function ConfigSwitch<T extends string>({ items, active, label, choose }: {
-  items: { id: T; name: string }[]; active: T; label: string; choose: (id: T) => void
+  items: { id: T; name: string; guidance?: string }[]; active: T; label: string; choose: (id: T) => void
 }) {
   return <div className="config-switch" role="group" aria-label={label}>
     {items.map(item => <button type="button" key={item.id}
-      aria-pressed={active === item.id} onClick={() => choose(item.id)}>{item.name}</button>)}
+      aria-pressed={active === item.id} onClick={() => choose(item.id)}>
+      {item.name}
+      {item.guidance && <small className="studio-config-guidance">{item.guidance}</small>}
+    </button>)}
   </div>
 }
 
@@ -606,17 +610,13 @@ function Results({ game, mission, progress, t, back, replay, open, studio = fals
   const actions = <div className="action-row">
       {flight?.delivered && next && <ActionButton onClick={() => open(next.id)}>{t('nextBrief', { mission: t(next.title) })}</ActionButton>}
       <button className="button secondary" onClick={back}>{t('home')}</button>
-      {legacyCubeSat && flight?.delivered && !flight.stretch && game.scienceGoal !== 'stretch' &&
-        <button className="button secondary" onClick={() => replay(true, 'stretch')}>{t('tryChallengeAction')}</button>}
-      <button className="button secondary" onClick={() => replay(true)}>{t('chapterReplaySame')}</button>
-      <button className="button secondary" onClick={() => replay(false)}>{t('chapterReplayNew')}</button>
+      <button className="button secondary" onClick={replay}>{t(game.commission ? 'replayCommission' : 'playAgain')}</button>
+      {game.commission && <button className="button secondary" onClick={() => open(game.missionId)}>{t('changeCommission')}</button>}
     </div>
   const client = game.commission ? commissionFor(game) : null
-  const detail = !studio ? undefined : client && flight
-    ? flight.extra ? t(flight.extra === 'north' ? client.northImpact : client.southImpact)
-      : t(flight.delivered ? client.delivered : 'commissionShortfall', { count: flight.primary, required: client.required })
-    : flight?.delivered ? t(mission.id === orbitalLaunch.id ? 'studioOrbitalImpact' : 'studioLunarImpact')
-    : game.evidence?.auxPass === false ? t('commissionInterfaceFailed') : undefined
+  const detail = !studio ? undefined : client && flight ? <CommissionDeliveryFeedback game={game} flight={flight} t={t} />
+    : flight?.delivered ? <p>{t(mission.id === orbitalLaunch.id ? 'studioOrbitalImpact' : 'studioLunarImpact')}</p>
+    : game.evidence?.auxPass === false ? <p>{t('commissionInterfaceFailed')}</p> : undefined
   const outcomeArt = flight ? flight.delivered ? 'delivered' : 'short' : 'stopped'
   return <article className={studio ? 'studio-results' : 'manual'}>
     {studio ? <>
@@ -625,7 +625,7 @@ function Results({ game, mission, progress, t, back, replay, open, studio = fals
         <div className="studio-handoff studio-outcome">
           {summary}
           {!flight && <p className="studio-update">{t('studioStoppedAt', { stage: t(stoppedStage(game)) })}</p>}
-          {detail && <StudioBubble t={t} speaker={flight ? 'comms' : 'power'} prop={flight ? 'data' : 'scale'}><p>{detail}</p></StudioBubble>}
+          {detail && <StudioBubble t={t} speaker={flight ? 'comms' : 'power'} prop={flight ? 'data' : 'scale'}>{detail}</StudioBubble>}
         </div>
       </div>
       {actions}
@@ -653,8 +653,6 @@ function Results({ game, mission, progress, t, back, replay, open, studio = fals
       <MissionRating game={game} mission={mission} t={t} />
       <StoryDebrief game={game} t={t} />
       {game.missionId === 'lunar-mission' && <Portfolio progress={progress} t={t} />}
-      {legacyCubeSat && flight?.delivered && !flight.stretch && game.scienceGoal !== 'stretch' &&
-        <p className="action-note">{t('tryChallenge', { count: cubeSat.stretchBatches })}</p>}
 
       <div className="references">
         <Disclosure label={t('phaseTableTitle')}><PhaseTable t={t} current="F" /></Disclosure>
@@ -732,7 +730,7 @@ function Reference({ game, mission, t, send, showEvidence = true }: Controls & {
     <Disclosure label={t('details')}>
       {game.stage !== 'results' && <p>{t(game.returned ? 'returnedDetail' : mission.stageDetails[game.stage], { percent: percent(reviewRiskThreshold) })}</p>}
       <Disclosure label={t('configuration')}><DesignSummary mission={mission} design={game.design} t={t} /></Disclosure>
-      <Disclosure label={t('briefTitle')}><mission.ui.Requirements t={t} /></Disclosure>
+      {!game.commission && <Disclosure label={t('briefTitle')}><mission.ui.Requirements t={t} /></Disclosure>}
       <Disclosure label={t('phaseTableTitle')} value={`Phase ${phaseOf(game)}`}>
         <PhaseTable t={t} current={phaseOf(game)} />
       </Disclosure>
@@ -852,7 +850,7 @@ function CubeSatRiskChecks({ game, mission, t, send }: Controls) {
 
 export function Single(props: Props) {
   const { game } = props
-  const studio = Boolean(game.commission || game.missionId === orbitalLaunch.id || game.missionId === lunarMission.id)
+  const studio = usesStudio(game)
   if (game.stage === 'results' && !game.playback) return <Results {...props} studio={studio} />
   return studio ? <Studio {...props} /> : <LegacyWorkbench {...props} />
 }
@@ -959,31 +957,97 @@ function Shortage({ game, mission, t, weeks, credits }: Pick<Controls, 'game' | 
   })}</small>
 }
 
-function StudioConfiguration({ game, mission, t, send }: Controls) {
-  const groups = Object.entries(mission.groups).filter(([id]) => mission.configurable?.(game, id) !== false)
-  const [selection, select] = useState(groups[0]?.[0])
-  const active = groups.find(([id]) => id === selection) ?? groups[0]
-  if (!active) return null
+function studioConfigGroups(game: Game, mission: MissionModule) {
+  return Object.entries(mission.groups).filter(([id]) => mission.configurable?.(game, id) !== false)
+}
+
+type ConfigGroups = ReturnType<typeof studioConfigGroups>
+
+type PlanningMargin = {
+  requirement: Message
+  margin: number
+  unit: 'kg' | 'W' | 'weeks' | 'credits'
+  conservative?: number
+}
+
+function planningMargins(game: Game): PlanningMargin[] {
+  if (game.commission) {
+    const plan = commissionPlan(game)
+    return [
+      { requirement: 'planMassLabel', margin: plan.massLimit - plan.mass, unit: 'kg' },
+      { requirement: 'planPowerLabel', margin: plan.available - plan.peak, unit: 'W' },
+      { requirement: 'studioScheduleMargin', margin: plan.spareWeeks, unit: 'weeks' },
+      { requirement: 'studioPlanBudget', margin: plan.spareCredits, unit: 'credits' },
+    ]
+  }
+  if (game.missionId === orbitalLaunch.id) {
+    const { lift } = orbitalRisks(game.seed, game.design as OrbitalDesign, orbitalState(game))
+    return [
+      { requirement: 'studioLiftMargin', margin: lift.limit - lift.known.min, conservative: lift.limit - lift.known.max, unit: 'kg' },
+      { requirement: 'studioPlanBudget', margin: game.credits - orbitalPlanCost(game), unit: 'credits' },
+    ]
+  }
+  const budget = lunarBudgetForecast(game)
+  return [
+    { requirement: 'studioPropellantMargin', margin: massBudget(game).margin - lunarMission.reserveKg, unit: 'kg' },
+    { requirement: 'studioPlanBudget', margin: -budget.shortfall, unit: 'credits' },
+  ]
+}
+
+function adjustmentCopy({ requirement, margin, unit, conservative }: PlanningMargin, t: Translate) {
+  const target = t(requirement)
+  if (margin >= 0) {
+    return t(conservative !== undefined && conservative < 0 ? 'studioAdjustmentVerify' : 'studioAdjustmentClears', { target })
+  }
+  const count = Math.round(-margin * 10) / 10
+  const amount = unit === 'weeks' || unit === 'credits' ? t(unit, { count }) : `${count}\u00a0${unit}`
+  return t('studioAdjustmentRemaining', { target, amount })
+}
+
+function StudioConfiguration({ game, mission, t, send, disclosure, groups, active, select }: Controls & {
+  disclosure?: 'open' | 'closed'; groups: ConfigGroups; active: ConfigGroups[number]; select: (group: string) => void
+}) {
+  const [expanded] = useState(disclosure === 'open')
   const [id, group] = active
+  const unmet = new Map(planningMargins(game).filter(item => item.margin < 0).map(item => [item.requirement, item.margin]))
+  const comparisons = new Map(groups.map(([key, item]) => {
+    const alternatives = Object.keys(item.options).map(value => {
+      const alternative = key === id || unmet.size > 0 ? runMission(game, {
+        type: 'configure', design: { ...game.design, [key]: value },
+      }) : game
+      const improvements = alternative !== game && unmet.size > 0
+        ? planningMargins(alternative).filter(item => item.margin > (unmet.get(item.requirement) ?? Infinity))
+        : []
+      return [value, { alternative, improvements }] as const
+    })
+    return [key, new Map(alternatives)] as const
+  }))
   const options = optionList(group.options, t, mission).map(option => {
-    const design = { ...game.design, [id]: option.id }
-    const alternative = runMission(game, { type: 'configure', design })
-    return { ...option, art: designIllustration(id, option.id), extra: game.commission
-      ? <CommissionOption game={game} design={design} t={t} />
-      : <span className="studio-option-readings"><DesignReadings game={alternative} t={t} compare /></span> }
+    const { alternative, improvements } = comparisons.get(id)!.get(option.id)!
+    return { ...option, art: designIllustration(id, option.id), extra: <>
+      {improvements.map(item => <small key={item.requirement} className="studio-option-guidance"
+        data-meets-target={(item.conservative ?? item.margin) >= 0}>{adjustmentCopy(item, t)}</small>)}
+      {game.commission ? <CommissionOption game={game} design={alternative.design} t={t} />
+        : <span className="studio-option-readings"><DesignReadings game={alternative} t={t} compare /></span>}
+    </> }
   })
-  return <div className="studio-configuration">
+  const configuration = <div className="studio-configuration">
     <div className="studio-preview" aria-live="polite">
       <strong>{t('studioForecast')}</strong>
       {game.commission ? <CommissionPlan game={game} t={t} /> : mission.ui.Preview && <mission.ui.Preview game={game} t={t} />}
     </div>
     <div className="studio-config-options">
       <ConfigSwitch active={id} label={t('configuration')} choose={select}
-        items={groups.map(([key, item]) => ({ id: key, name: t(item.legend) + ' · ' + t(item.options[game.design[key]].label) }))} />
+        items={groups.map(([key, item]) => {
+          const targets = new Set([...comparisons.get(key)!.values()].flatMap(option => option.improvements.map(item => t(item.requirement))))
+          return { id: key, name: t(item.legend) + ' · ' + t(item.options[game.design[key]].label),
+            guidance: targets.size ? t('studioAdjustmentGroup', { targets: [...targets].join(t('listSeparator')) }) : undefined }
+        })} />
       <Options key={id} legend={group.legend} options={options} value={game.design[id]} layout="pair" illustrated t={t}
         choose={value => send({ type: 'configure', design: { ...game.design, [id]: value } })} />
     </div>
   </div>
+  return disclosure ? <Disclosure label={t('studioCompare')} open={expanded}>{configuration}</Disclosure> : configuration
 }
 
 function CommissionCorrections({ game, mission, send, t }: Controls) {
@@ -1030,6 +1094,7 @@ function StudioTask({ game, mission, t, send, task, card = false, onAssign }: Co
     <Shortage game={game} mission={mission} t={t} {...required} />
     {mission.ui.TaskNote && <mission.ui.TaskNote game={game} task={id} cost={cost} t={t} />}
     {correction && mission.id === orbitalLaunch.id && <OrbitalCorrectionReading game={game} t={t} design={correction.design as OrbitalDesign} />}
+    {correction && mission.id === lunarMission.id && <DesignReadings game={{ ...game, design: correction.design }} t={t} />}
     {correction && correction.retest.weeks > 0 && <small>{t('repairAndRetest', {
       weeks: cost.weeks + correction.retest.weeks, cost: missionMoney(mission, required.credits, t),
     })}</small>}
@@ -1081,15 +1146,16 @@ function StudioReviewIssues({ game, t }: Pick<Controls, 'game' | 't'>) {
     <li key={index}>{item && `${t(item)} · `}{copy(t, detail)}</li>)}</ul>
 }
 
-function StudioSegmentChoice({ game, send, t, draft }: Controls & { draft: string }) {
+function StudioSegmentChoice({ game, send, t, draft, ground = false }: Controls & { draft: string; ground?: boolean }) {
   const segment = currentFlightSegment(game)!
   const context = flightContext(game)
   const choices = segment.choices?.(context) ?? []
   const status = segment.status?.(context)
   const [selected, select] = useDecisionDraft(draft)
-  const choice = choices.find(option => option.id === selected[0])?.id ?? null
+  const choice = choices.length === 1 ? choices[0].id : choices.find(option => option.id === selected[0])?.id ?? null
+  const turn = context.progress.turn ?? 0
   return <>
-    {status && <p className="studio-preview">{copy(t, status)}</p>}
+    {!ground && status && <p className="studio-preview">{copy(t, status)}</p>}
     <Options legend="segmentChoices" layout="pair" illustrated value={choice} choose={id => select([id])} t={t}
       options={choices.map(option => ({
         id: option.id, name: option.label, detail: copy(t, option.detail), art: choiceIllustration(option.id, game.commission),
@@ -1097,14 +1163,16 @@ function StudioSegmentChoice({ game, send, t, draft }: Controls & { draft: strin
           {option.warning && '⚠ '}{copy(t, option.consequence)}
         </small>,
       }))} />
-    <ActionButton disabled={choice === null} onClick={() => send({ type: 'segment', segment: segment.id, choice, turn: context.progress.turn ?? 0 })}>
-      {t(segment.action ?? 'runSegment')}
+    <ActionButton disabled={choice === null} onClick={() => send({ type: 'segment', segment: segment.id, choice, turn })}>
+      {t(ground ? 'studioConfirmGroundResponse' : segment.action ?? 'runSegment')}
     </ActionButton>
   </>
 }
 
 function Studio({ game, mission, t, send, back, languageControls }: Props) {
   const controls = { game, mission, t, send }
+  const orbital = game.missionId === orbitalLaunch.id
+  const lunar = game.missionId === lunarMission.id
   const event = pendingEvent(game)
   const segment = currentFlightSegment(game)
   const context = segment && flightContext(game)
@@ -1120,7 +1188,9 @@ function Studio({ game, mission, t, send, back, languageControls }: Props) {
   const mandatory = tasks.filter(task => !mission.ui.optionalTasks?.has(task.id) && !task.correction)
   const optional = tasks.filter(task => mission.ui.optionalTasks?.has(task.id) || task.correction)
   const corrections = game.commission && (game.stage === 'design' || game.stage === 'review') ? commissionRepairs(game) : []
-  const revise = game.returned && !game.commission
+  const orbitalLiftBlocked = orbital && review?.gate === 'FRR' && review.issues.some(issue => issue.detail.message === 'orbitalFrrReturnMargin')
+  const reviewBlocked = !game.commission && review?.issues.some(issue => !issue.waiver)
+  const revise = !game.commission && (game.returned || reviewBlocked)
   const returnedTasks = revise ? optional.filter(task => adjustmentTasks.has(task.id) || task.id.startsWith('fix:')) : []
   const returned = revise ? [...mandatory, ...returnedTasks] : mandatory
   const extra = revise ? optional.filter(task => !returnedTasks.includes(task)) : optional
@@ -1128,28 +1198,57 @@ function Studio({ game, mission, t, send, back, languageControls }: Props) {
   const latest = game.log.at(-1)
   const eventChoices = event?.choices.filter(choice => choice.available?.(game) !== false) ?? []
   const eventDetail = event && t(event.detail, { ...event.values?.(game), ...(event.subject?.(game) && { item: t(event.subject(game)!) }) })
-  const canEdit = !event && canConfigure(game) && (!game.commission || !game.log.some(item => item.id === 'screen'))
+  const groups = !event && canConfigure(game) && (!game.commission || commissionCanConfigure(game)) ? studioConfigGroups(game, mission) : []
+  const canEdit = groups.length > 0
   const client = game.commission ? commissionFor(game) : null
   const commissionNumbers = game.commission && !['flight', 'results'].includes(game.stage) ? commissionPlan(game) : null
+  const planLimits = commissionNumbers ? commissionLimits(commissionNumbers) : []
   const stageKey = [game.missionId, game.seed, game.stage, game.log.length].join(':')
   const key = [stageKey, game.gate, game.returned, event?.id, segment?.id, game.flightProgress?.turn].join(':')
+  const opening = game.stage === 'feasibility'
+  const partnerOffer = lunar && event?.id === 'offers'
+  const preflight = opening && !event
   const [motion, setMotion] = useState<{ paused: boolean; skipped?: string }>({ paused: false })
   const [meetingKey, setMeetingKey] = useState<string>()
-  const meetingId = [stageKey, event?.id].join(':')
+  const [comparisonGroup, setComparisonGroup] = useState<string>()
+  const [releaseKey, setReleaseKey] = useState<string>()
+  const releaseHeading = useRef<HTMLHeadingElement>(null)
+  const meetingId = lunar && opening && (partnerOffer || preflight)
+    ? [game.missionId, game.seed, game.stage].join(':') : [stageKey, event?.id].join(':')
   const meetingHeading = useRef<HTMLHeadingElement>(null)
   const job = game.studioWork
   const launch = game.studioLaunch
-  const awaitingSignal = game.commission && segment?.id === 'commission-pass'
-  const preflight = Boolean(game.commission && game.stage === 'feasibility')
+  const lunarLaunch = lunar && segment?.id === 'launch'
+  const readyToLaunch = studioReadyToLaunch(game)
+  const lunarCheckout = lunar && segment?.id === 'checkout'
+  const orbitalPass = orbital && segment?.id === 'pass'
+  const awaitingSignal = game.commission && segment?.id === 'commission-pass' && !readyToLaunch
   const blockedPlan = event?.id === 'CostReview' || event?.id === 'PartnerExit' || (event?.id === 'budgetCut'
     && game.credits + orbitalLaunch.events.budgetCut.budgetChange < orbitalPlanCost(game))
   const designDecision = Boolean(game.commission && tasks.some(task => task.id === 'screen') && tasks.some(task => task.id === 'freeze'))
   const meetingRequired = !job && !launch && Boolean(preflight || corrections.length || revise || blockedPlan || eventChoices.length > 1 || designDecision)
   const meeting = !job && !launch && meetingKey === meetingId
-  const tutorialStage = game.studioTutorial && !game.studioTutorial.includes(game.stage)
-  const teaching = Boolean(tutorialStage && !job && !launch && !event && !corrections.length
-    && (preflight ? meeting : !meeting && !designDecision && (mandatory.length || review)))
-  const comparisonOpen = preflight ? !teaching : canEdit
+  const release = !job && !event && review?.gate === 'FRR'
+  const releaseVisible = release && releaseKey === stageKey
+  const stageGuide = game.commission ? studioTutorialMessage(game.stage) : undefined
+  const tutorial = game.studioTutorial && !game.studioTutorial.includes(game.stage) ? stageGuide : undefined
+  const comparisonGuide = preflight && meeting ? tutorial : undefined
+  const showWorkGuide = !meetingRequired && !event && (review || mandatory.some(task => affordable(game, task.cost)))
+  const guidanceAvailable = !meeting && !job && !launch && (preflight || release || designDecision || showWorkGuide)
+  const actionGuide = tutorial && guidanceAvailable
+    ? preflight ? 'studioTutorialEnter'
+      : tutorial
+    : undefined
+  const teaching = Boolean(comparisonGuide || actionGuide)
+  const comparisonOpen = preflight ? !comparisonGuide : canEdit
+  const activeGroup = groups.find(([id]) => id === comparisonGroup) ?? groups[0]
+  let meetingPreview: MeetingPreview | undefined
+  if (meeting && comparisonOpen && activeGroup) {
+    const [group] = activeGroup
+    const option = game.design[group]
+    const art = designIllustration(group, option)
+    meetingPreview = { group, option, ...(typeof art === 'string' ? { prop: art } : art) }
+  }
   const finishTutorial = () => send({ type: 'studioTeach', stage: game.stage })
   const toggleMotion = () => setMotion(current => ({ ...current, paused: !current.paused, skipped: undefined }))
   const animationControl = <StudioAnimationButton paused={motion.paused} toggle={toggleMotion} t={t} />
@@ -1159,6 +1258,7 @@ function Studio({ game, mission, t, send, back, languageControls }: Props) {
     return () => window.clearTimeout(timeout)
   }, [job, send])
   useEffect(() => { if (meeting && !teaching) meetingHeading.current?.focus({ preventScroll: true }) }, [meeting, teaching])
+  useEffect(() => { if (releaseVisible) releaseHeading.current?.focus() }, [releaseVisible])
 
   const skip = () => setMotion(current => ({ ...current, skipped: key }))
   const noAnimation = motion.paused || motion.skipped === key
@@ -1166,11 +1266,17 @@ function Studio({ game, mission, t, send, back, languageControls }: Props) {
   const report = workReport ?? studioReport(game, segment?.id, flightChoices[0]?.prompt, evidence?.auxPass === false || corrections.length > 0 && game.stage === 'design')
   const flightAlert = /^(risk:|card:(Eclipse|Weather|Lightning|Scrub))/.test(flightChoices[0]?.prompt ?? '')
     || flightBrief?.message === 'orbitalPassDegraded'
-  const alert = sceneModel(mission.id, game).warning || report.message === 'studioAnomaly' || flightAlert
-  const title = t(event?.title ?? segment?.title ?? (game.returned ? 'returned' : game.stage))
-  const objective = client && t(game.commission === 'bay' ? 'studioBayBrief' : 'studioRiverBrief', { count: client.required })
-  const line = job ? t('studioWorkingOn') : preflight ? objective : awaitingSignal ? t('studioAwaitSignal') : event ? eventDetail
-    : flightBrief ? copy(t, flightBrief) : tasks.some(task => task.id === 'screen') ? t('studioDesignQuestion') : t(report.message)
+  const alert = Boolean(reviewBlocked) || sceneModel(mission.id, game).warning || report.message === 'studioAnomaly' || flightAlert
+  const title = t(event?.title ?? (lunarLaunch && !readyToLaunch ? 'studioGroundChecks' : segment?.title)
+    ?? (game.returned ? 'returned' : game.stage))
+  const objective = client ? t(game.commission === 'bay' ? 'studioBayBrief' : 'studioRiverBrief', { count: client.required })
+    : orbital ? t('studioOrbitalBrief', { payload: orbitalLaunch.testPayloadKg, units: orbitalLaunch.confirmationUnits })
+    : t('studioLunarBrief', { count: lunarMission.minimumBatches })
+  const line = job ? t('studioWorkingOn') : preflight || partnerOffer ? objective
+    : awaitingSignal ? t('studioAwaitSignal') : game.commission && readyToLaunch ? t('studioClearedToLaunch') : event ? eventDetail
+    : flightBrief ? copy(t, flightBrief) : orbitalLiftBlocked ? t('studioOrbitalMarginFailure')
+    : lunar && reviewBlocked ? t('studioLunarReviewBlocked')
+    : tasks.some(task => task.id === 'screen') ? t('studioDesignQuestion') : t(report.message)
   const work = pendingWorkId(game)
   const beforeEvent = work && <p className="notice">{t(game.pendingWork!.remaining ? 'workPaused' : 'workPausedDone', {
     work: t(mission.costs[work].label), week: game.week, count: game.pendingWork!.remaining,
@@ -1204,6 +1310,12 @@ function Studio({ game, mission, t, send, back, languageControls }: Props) {
     primary = <ActionButton onClick={() => setMeetingKey(meetingId)}>{t('studioEnterMeeting')}</ActionButton>
   } else if (event) {
     primary = <StudioEventChoices {...controls} cards={false} />
+  } else if (lunarLaunch && flightChoices.length > 0) {
+    primary = <StudioSegmentChoice key={key} {...controls} draft={key + ':launch'} ground />
+  } else if (readyToLaunch) {
+    primary = <ActionButton onClick={() => send({ type: 'launchStudio', turn: game.flightProgress?.turn ?? 0, at: Date.now() })}>
+      {t('studioLaunchVehicle')}
+    </ActionButton>
   } else if (segment && context) {
     primary = flightChoices.length > 1
       ? decision('segment', 'studioRespond', title, <StudioSegmentChoice {...controls} draft={key} />, true)
@@ -1218,45 +1330,55 @@ function Studio({ game, mission, t, send, back, languageControls }: Props) {
   } else if (returned.length === 1) {
     primary = <StudioTask key={returned[0].id} {...controls} task={returned[0]} />
   }
-  const submitReview = () => send(game.commission
-    ? { type: 'releaseStudio', turn: game.log.length, at: Date.now() }
-    : { type: 'review', turn: game.log.length })
-  const reviewAction = !event && !meetingRequired && review && (review.issues.some(issue => issue.waiver)
-    ? decision('review', 'studioReview', t('submitGate', { gate: review.gate }), <StudioWaivers {...controls} draft={key + ':review'} />, false, Boolean(primary))
-    : !game.returned || !returned.some(task => affordable(game, task.correction?.required ?? task.cost)) ? <ActionButton className={primary ? 'button secondary' : 'button primary'}
+  const submitReview = () => send({ type: 'review', turn: game.log.length })
+  const reviewNeedsWaiver = review?.issues.some(issue => issue.waiver)
+  const secondaryReview = Boolean(primary) && game.stage !== 'review'
+  const reviewAction = !event && !meetingRequired && review && (!release || releaseVisible) && (reviewNeedsWaiver
+    ? decision('review', release ? 'chapterReviewSign' : 'studioReview', t('submitGate', { gate: review.gate }), <StudioWaivers {...controls} draft={key + ':review'} />, false, secondaryReview)
+    : !game.returned || !returned.some(task => affordable(game, task.correction?.required ?? task.cost)) ? <ActionButton className={secondaryReview ? 'button secondary' : 'button primary'}
       onClick={submitReview}>{t('submitGate', { gate: review.gate })}</ActionButton> : null)
+  const reviewFirst = game.stage === 'review' && Boolean(reviewAction)
+  const releaseAction = release && !releaseVisible && <ActionButton key="release-evidence" onClick={() => {
+    setReleaseKey(stageKey)
+    if (tutorial) finishTutorial()
+  }}>{t('studioReview')}</ActionButton>
+  const completeActionGuide = preflight || designDecision || release ? undefined : finishTutorial
   const blockedCommission = commissionNumbers && !corrections.length && game.stage === 'design' && !tasks.some(task => task.id === 'freeze')
     && (commissionNumbers.spareWeeks < 0 || commissionNumbers.spareCredits < 0)
-  const canConfirm = preflight && commissionNumbers && commissionNumbers.spareWeeks >= 0 && commissionNumbers.spareCredits >= 0
-    && commissionNumbers.mass <= commissionNumbers.massLimit && commissionNumbers.peak <= commissionNumbers.available
-  const canCallMeeting = eventChoices.length === 1 || !event && !segment && (Boolean(game.commission) || canEdit || extra.some(task => task.correction))
+  const assess = preflight && offeredTasks.find(task => task.id === 'assess')
+  const canConfirm = assess && affordable(game, assess.cost) && (!commissionNumbers || (commissionNumbers.spareWeeks >= 0
+    && commissionNumbers.spareCredits >= 0 && !planLimits.length))
+  const discussionTasks = revise ? [...returned, ...extra] : tasks.filter(task =>
+    task.correction || task.id.startsWith('fix:') || (orbital && (task.id === 'fixLink' || task.id === 'handover')))
+  const hasAvailableDiscussionTask = discussionTasks.some(task => affordable(game, task.correction?.required ?? task.cost))
+  const canCallMeeting = !event && !segment && (canEdit || hasAvailableDiscussionTask)
   const meetingChoices = event ? <><h3>{title}</h3><StudioEventChoices {...controls} cards />
     {(event.quote || event.file) && <Disclosure label={t('studioEventNotes')}>{notes}</Disclosure>}</>
     : corrections.length ? <>
       <h3>{t('studioAffectedRequirements')}</h3>
-      {game.stage === 'review' ? <StudioReviewIssues game={game} t={t} /> : latestCopy && <p>{copy(t, latestCopy)}</p>}
+      {game.stage === 'review' ? !releaseVisible && <StudioReviewIssues game={game} t={t} /> : latestCopy && <p>{copy(t, latestCopy)}</p>}
       <CommissionCorrections {...controls} />
-      {!corrections.some(item => item.fits) && review && <>
-        <p>{t('studioNoCorrectionFits')}</p>
-        <ActionButton onClick={submitReview}>{t('submitGate', { gate: review.gate })}</ActionButton>
+      {review && (!game.returned || !corrections.some(item => item.fits)) && <>
+        {!corrections.some(item => item.fits) && <p>{t('studioNoCorrectionFits')}</p>}
+        {releaseVisible && <ActionButton onClick={submitReview}>{t('submitGate', { gate: review.gate })}</ActionButton>}
       </>}
     </> : designDecision ? <>
-      {tutorialStage && <p className="studio-tutorial-target">{t('studioTutorialDesign')}</p>}
+      {tutorial && <div className="studio-tutorial-target"><TutorialNote message={tutorial} t={t} /></div>}
       <div className="studio-action-grid">{mandatory.map(task =>
-        <StudioTask key={task.id} {...controls} task={task} card onAssign={tutorialStage ? finishTutorial : undefined} />)}
+        <StudioTask key={task.id} {...controls} task={task} card onAssign={tutorial ? finishTutorial : undefined} />)}
       </div>
-      {canEdit && <Disclosure label={t('studioCompare')}><StudioConfiguration {...controls} /></Disclosure>}
     </> : <>
-      {comparisonOpen ? <StudioConfiguration {...controls} /> : !preflight && <>
+      {!comparisonOpen && !preflight && <>
         <p>{t('studioLockedPlan')}</p>
         <DesignSummary mission={mission} design={game.design} t={t} />
         {game.commission && <CommissionPlan game={game} t={t} />}
+        {!game.commission && !revise && <DesignReadings game={game} t={t} />}
       </>}
       {revise && <><h3>{t('studioAffectedRequirements')}</h3><StudioReviewIssues game={game} t={t} /><DesignReadings game={game} t={t} /></>}
-      {!preflight && !game.commission && (revise || comparison.length > 0) && <div className="studio-action-grid">
-        {(revise ? [...returned, ...extra] : comparison).map(task => <StudioTask key={task.id} {...controls} task={task} card />)}
+      {!preflight && discussionTasks.length > 0 && <div className="studio-action-grid">
+        {discussionTasks.map(task => <StudioTask key={task.id} {...controls} task={task} card />)}
       </div>}
-      {revise && review && !returned.some(task => affordable(game, task.correction?.required ?? task.cost)) &&
+      {revise && review && (!release || releaseVisible) && !hasAvailableDiscussionTask &&
         <ActionButton onClick={submitReview}>{t('submitGate', { gate: review.gate })}</ActionButton>}
     </>
 
@@ -1272,14 +1394,17 @@ function Studio({ game, mission, t, send, back, languageControls }: Props) {
         : mission.id === orbitalLaunch.id ? t('storyConfirmation', { count: orbitalLaunch.confirmationUnits })
         : t('dataBatches', { count: lunarMission.minimumBatches })}</dd></div>
     </dl>
-    {launch ? <StudioLaunch startedAt={launch.startedAt} t={t} paused={motion.paused} toggle={toggleMotion} send={send} />
+    {launch ? <StudioLaunch game={game} startedAt={launch.startedAt} t={t} paused={motion.paused} toggle={toggleMotion} send={send} />
       : <div className="studio-workspace">
-      <StudioScene missionId={mission.id} game={game} t={t} sequence={key} speaker={report.speaker} prop={report.prop} paused={noAnimation} alert={alert}
-        animationControl={animationControl} meeting={meeting} control={awaitingSignal ? 'first-signal' : undefined} />
+      <StudioScene missionId={mission.id} game={game} t={t} sequence={meeting ? meetingId : key} speaker={report.speaker} prop={report.prop} paused={noAnimation} alert={alert}
+        animationControl={animationControl} meeting={meeting} meetingPreview={meetingPreview} launch={readyToLaunch ? 'countdown' : undefined}
+        control={lunarCheckout ? 'lunar-checkout' : awaitingSignal || orbitalPass ? 'first-signal' : undefined} />
       <section className={`studio-handoff${alert ? ' studio-alert' : ''}`} aria-label={t('studioStartReport')}>
-        <h2 ref={meetingHeading} tabIndex={-1}>{job ? t('studioWorkInProgress') : meeting ? t(preflight ? 'studioInitialMeeting' : 'studioMeeting') : title}</h2>
+        <h2 ref={meetingHeading} tabIndex={-1}>{job ? t('studioWorkInProgress') : meeting ? t(preflight || partnerOffer ? 'studioInitialMeeting' : 'studioMeeting') : title}</h2>
         <StudioBubble t={t} speaker={report.speaker} prop={report.prop}><p>{line}</p></StudioBubble>
         {job ? <p className="studio-update" role="status">{jobTitle}</p> : <>
+        {partnerOffer && <p>{eventDetail}</p>}
+        {lunarCheckout && <p className="studio-update">{t('studioLunarCheckout')}</p>}
         {latestTask && <p className="studio-update" role={!latestCopy ? 'status' : undefined}>{t('studioWorkDone', {
           work: t(latestTask.label, { ...latestTask, slots: 1 }),
         })} {latest?.report && t(passes(latest.report) ? 'studioTestPassed' : 'checksPassed', {
@@ -1289,46 +1414,56 @@ function Studio({ game, mission, t, send, back, languageControls }: Props) {
         {meetingRequired && !meeting && <p>{t('studioMeetingInvitation')}</p>}
         {event && beforeEvent}
         {eventChoices.length === 1 && !meeting && <p>{t(eventChoices[0].detail, eventChoices[0].values?.(game))}</p>}
-        {!meeting && commissionNumbers && game.stage === 'design' && <p className={blockedCommission || commissionNumbers.mass > commissionNumbers.massLimit ? 'studio-blocker' : 'studio-update'}>
+        {!meeting && commissionNumbers && game.stage === 'design' && <p className={blockedCommission || planLimits.length ? 'studio-blocker' : 'studio-update'}>
           {t(client!.name)} · {t('massUse', { mass: commissionNumbers.mass, limit: commissionNumbers.massLimit })}
           {' · '}{t('studioLaunchLimit', commissionNumbers)}
         </p>}
+        {!meeting && game.stage === 'design' && planLimits.map(issue => <p key={issue.message} className="studio-blocker">{copy(t, issue)}</p>)}
         {blockedCommission && <p className="studio-blocker">{t('commissionCannotFreeze')}</p>}
-        {commissionNumbers && !blockedCommission && !corrections.length && game.stage === 'design'
+        {commissionNumbers && !blockedCommission && !planLimits.length && !corrections.length && game.stage === 'design'
           && ['sensor', 'combined'].includes(game.design.capability) && !game.log.some(entry => entry.id === 'screen')
           && !tasks.some(task => task.id === 'screen') && <p className="studio-blocker">{t('commissionScreenUnavailable', {
             weeks: mission.costs.screen.weeks, cost: missionMoney(mission, mission.costs.screen.credits, t),
           })}</p>}
         {!meeting && !event && !segment && !game.commission && (canEdit || game.returned) && <DesignReadings game={game} t={t} />}
-        {!meeting && !event && !segment && <StudioReviewIssues game={game} t={t} />}
-        {game.commission && game.stage === 'review' && !teaching && !corrections.length && !meeting &&
-          <p className="action-note">{t('reviewDetail')}</p>}
+        {!releaseVisible && !meeting && !event && !segment && <StudioReviewIssues game={game} t={t} />}
+        {releaseVisible && <section aria-labelledby="studio-release-title" className="studio-release">
+          <h3 ref={releaseHeading} id="studio-release-title" tabIndex={-1}>{t('studioReleaseEvidence')}</h3>
+          {game.evidence ? <EvidenceReport mission={mission} evidence={game.evidence} t={t} outdated={!evidence} />
+            : <p>{t('noEvidence')}</p>}
+          <StudioReviewIssues game={game} t={t} />
+          {review?.issues.length === 0 && <p className="good">{t('studioReleaseReady')}</p>}
+        </section>}
         {flightStatus && <p className="studio-update">{copy(t, flightStatus)}</p>}
         {meeting && !preflight && !meetingRequired && <p>{t('studioTeamWaiting')}</p>}
-        {meeting && preflight && !comparisonOpen && <TutorialTarget stage={game.stage} teach={teaching} complete={finishTutorial} t={t}>
-          <ActionButton>{t('studioCompare')}</ActionButton>
+        {comparisonGuide && <TutorialTarget message={comparisonGuide} t={t}>
+          <ActionButton onClick={finishTutorial}>{t('studioCompare')}</ActionButton>
         </TutorialTarget>}
+        {meeting && releaseAction}
         {!meeting && <div className="studio-next">
-          <TutorialTarget stage={game.stage} teach={teaching} complete={game.stage === 'review' ? undefined : finishTutorial} t={t}>
-            {teaching && game.stage === 'review'
-              ? <ActionButton key="review-tutorial" onClick={finishTutorial}>{t('studioReview')}</ActionButton>
-              : primary ?? reviewAction}
+          <TutorialTarget message={actionGuide} complete={completeActionGuide} t={t}>
+            {releaseAction || (reviewFirst ? reviewAction : primary ?? reviewAction)}
           </TutorialTarget>
-          {primary && reviewAction && <div inert={teaching}>{reviewAction}</div>}
+          {releaseAction && primary && <div inert={teaching}>{primary}</div>}
+          {!releaseAction && primary && reviewAction && <div inert={teaching}>{reviewFirst ? primary : reviewAction}</div>}
           {!meetingRequired && canCallMeeting && <div inert={teaching}><ActionButton className="button secondary" onClick={() => setMeetingKey(meetingId)}>
-            {t('studioCallMeeting')}
+            {t(planLimits.length ? 'commissionEditPlan' : 'studioCallMeeting')}
           </ActionButton></div>}
+          {stageGuide && guidanceAvailable && !teaching && <button type="button" className="text-button studio-guide-button"
+            onClick={() => { setReleaseKey(undefined); send({ type: 'startStudioTutorial' }) }}>{t('studioTutorialResume')}</button>}
         </div>}
         </>}
       </section>
     </div>}
     {meeting && (!preflight || comparisonOpen) && <section className="studio-handoff studio-meeting" aria-label={t(preflight ? 'studioCompare' : 'studioMeeting')}>
       {meetingChoices}
+      {comparisonOpen && activeGroup && <StudioConfiguration {...controls} groups={groups} active={activeGroup} select={setComparisonGroup}
+        disclosure={preflight ? undefined : designDecision || corrections.length ? 'closed' : 'open'} />}
       {preflight ? <ActionButton disabled={!canConfirm} onClick={() => send({ type: 'assignStudio', task: 'assess', turn: game.log.length, at: Date.now() })}>
         {t('studioConfirmPlan')} <CostLabel t={t} mission={mission} {...mission.costs.assess} />
       </ActionButton> : !meetingRequired && <button className="button secondary" onClick={() => setMeetingKey(undefined)}>{t('studioCloseMeeting')}</button>}
     </section>}
-    <div className="studio-files" inert={teaching || Boolean(job || launch || meetingRequired && !meeting)}>
+    <div className="studio-files" inert={teaching || Boolean(job || launch)}>
       {!meeting && !event && !segment && extra.length > 0 && <Disclosure label={t('optionalTasks')}>
         <div className="studio-optional"><div className="studio-action-grid">{extra.map(task =>
           <StudioTask key={task.id} {...controls} task={task} card />)}</div></div>
@@ -1375,7 +1510,7 @@ function OrbitalCorrectionReading({ game, design, t }: { game: Game; design: Orb
 
 function studioWorkReport(task: string): { speaker: Speaker; prop: Prop; message: Message } {
   const id = task.split(':').at(-1)!
-  const art = taskIllustration(id)
+  const art = taskIllustration(task.startsWith('contract:') ? task : id)
   const speaker = ['assess', 'prelim', 'trade', 'buildPayload'].includes(id) ? 'science'
     : ['buildAvionics', 'buildGround', 'rehearse', 'fixLink', 'stationTest', 'linkAnalysis'].includes(id) ? 'comms' : 'power'
   return { speaker, prop: typeof art === 'string' ? art : art.prop, message: 'studioWorkingOn' }
@@ -1400,11 +1535,14 @@ function studioReport(game: Game, segment?: string, prompt?: string, failedCamer
   }
   if (failedCamera) return { speaker: 'power', prop: 'camera', message: 'studioAuxFault' }
   if (game.returned) return { speaker: 'power', prop: 'scale', message: 'studioCorrection' }
+  const lunar = game.missionId === lunarMission.id
+  const orbital = game.missionId === orbitalLaunch.id
   const tasks: Record<Game['stage'], [Prop, Message]> = {
-    feasibility: [game.commission === 'bay' ? 'bay' : 'river', 'studioFeasibility'],
-    design: ['data', 'studioDesign'], build: ['box', 'studioBuild'],
-    integration: ['wrench', game.evidence ? 'studioRetest' : 'studioTest'],
-    review: ['scale', 'studioRelease'], flight: ['signal', 'studioFlight'], results: ['data', 'studioStartReport'],
+    feasibility: [game.commission ?? (orbital ? 'scale' : 'contract'), 'studioFeasibility'],
+    design: ['data', lunar ? 'studioLunarDesign' : 'studioDesign'],
+    build: [lunar ? 'lander' : orbital ? 'upperStage' : 'box', lunar ? 'studioLunarBuild' : orbital ? 'studioOrbitalBuild' : 'studioBuild'],
+    integration: ['wrench', game.evidence ? 'studioRetest' : lunar ? 'studioLunarTest' : orbital ? 'studioOrbitalTest' : 'studioTest'],
+    review: ['scale', lunar ? 'studioLunarReview' : 'studioRelease'], flight: ['signal', 'studioFlight'], results: ['data', 'studioStartReport'],
   }
   const [prop, message] = tasks[game.stage]
   return { speaker: game.stage === 'feasibility' ? 'science' : 'power', prop, message }
@@ -1439,13 +1577,15 @@ function DesignReadings({ game, t, compare = false }: { game: Game; t: Translate
     </span>
   }
   const mass = massBudget(game)
-  const route = lunarMission.routes[lunarDesign(game).route]
+  const design = lunarDesign(game)
+  const route = lunarMission.routes[design.route]
   return <span className="studio-readings">
     <span className={mass.margin < lunarMission.reserveKg ? 'studio-reading-main studio-blocker' : 'studio-reading-main'}>
       {t('lunarPreview', { margin: mass.margin, reserve: lunarMission.reserveKg, dry: mass.dry })}
     </span>
     <small>{t('lunarRouteBudget', { correction: route.correctionKg, propellant: route.propellantKg,
-      week: game.deadline - route.leadWeeks, allocation: mass.dry + mass.loaded })}</small>
+      week: game.deadline - route.leadWeeks, allocation: lunarAllocation(game) })}</small>
+    <small>{t('studioLunarDeliveryPlan', { count: lunarPlanBatches(design, 'extra', lunarMission.daylightWindows + lunarMission.powers[design.power].nightWindows).batches })}</small>
     {compare && <small>{t('chapterPlan', lunarPlanCost(game))}</small>}
   </span>
 }
