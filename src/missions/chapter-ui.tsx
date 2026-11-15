@@ -8,7 +8,7 @@ import { currentEvidence } from '../game/mission'
 import { approvedWeek, completed, nextDefectCopy, severityMessage } from './chapter'
 import { flyOrbital, orbitalCapacity, orbitalShortfall, orbitalCarried, orbitalDegradedCapacity, orbitalLaunch as orbital, orbitalLinkMaturity, orbitalNextStep, orbitalOdds, orbitalRiskIds, orbitalRisks, type OrbitalDesign } from './orbital-launch'
 import { orbitalPlan, orbitalRecords, orbitalRules, orbitalState } from './orbital-rules'
-import { lunarAllocation, lunarBudgetForecast, lunarDesign, lunarFlightRevised, lunarPlanCost, lunarRules, lunarState, lunarStates, massBudget } from './lunar-rules'
+import { lunarAllocation, lunarBudgetForecast, lunarDesign, lunarFlightRevised, lunarMarginCopy, lunarPlanCost, lunarRules, lunarState, lunarStates, massBudget } from './lunar-rules'
 import { lunarItemId, lunarMaturity, lunarMission as lunar, lunarOdds, lunarPlanBatches, lunarRisks, lunarVerified, type LunarFlightResult } from './lunar-mission'
 
 // Frames a low forecast: it reflects what has been checked, not a verdict on the lander.
@@ -211,14 +211,12 @@ function OrbitalPreview({ game, t }: { game: Game; t: Translate }) {
 }
 
 function LunarPreview({ game, t }: { game: Game; t: Translate }) {
-  const mass = massBudget(game)
+  const margin = lunarMarginCopy(game)
   const budget = lunarBudgetForecast(game)
   const d = lunarDesign(game)
   const route = lunar.routes[d.route]
   return <>
-    <p className={mass.margin < lunar.reserveKg ? 'warning' : 'action-note'}>{t('lunarPreview', {
-      margin: mass.margin, reserve: lunar.reserveKg, dry: mass.dry,
-    })}</p>
+    <p className={margin.blocked ? 'warning' : 'action-note'}>{margin.parts.map(part => t(part.message, part.values)).join(' ')}</p>
     <p className={budget.shortfall ? 'warning' : 'action-note'}>
       {t('lunarBudgetForecast', budget)}{' '}
       {budget.savings > 0 && <>{t('lunarBudgetSupport', budget)}{' '}</>}

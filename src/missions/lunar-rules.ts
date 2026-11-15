@@ -409,13 +409,42 @@ function toEvent(card: DevCard): MissionEvent {
   }
 }
 
+// The margin PDR judges. The mount can still be changed after PDR, so the review assumes the lightest one.
+export function lunarPdrMargin(game: Game) {
+  return lunarFlightRevised(game)
+    ? lunarMass({ ...lunarDesign(game), mount: 'lightweight' }, lunarState(game).extraKg, true, lunarAllocation(game)).margin
+    : massBudget(game).margin
+}
+
+// The margin line on the workbench: the current margin, whether the mount interface is counted in it, and the
+// threshold of the next review that looks at it.
+export function lunarMarginCopy(game: Game): { blocked: boolean; parts: Copy[] } {
+  const mass = massBudget(game)
+  const reserve = mission.reserveKg
+  const parts: Copy[] = [
+    { message: 'lunarPreview', values: { margin: mass.margin, dry: mass.dry } },
+    massKnown(game) ? { message: 'lunarPreviewMountCounted', values: { mount: mission.mounts[lunarDesign(game).mount].growthKg } }
+      : { message: 'lunarPreviewMountOpen' },
+  ]
+  if (game.stage === 'design' && game.gate === 'PDR') {
+    const light = lunarPdrMargin(game)
+    parts.push(light === mass.margin ? { message: 'lunarPreviewPdr', values: { reserve } }
+      : { message: 'lunarPreviewPdrLight', values: { light, reserve } })
+    return { blocked: light < reserve, parts }
+  }
+  if (game.stage !== 'flight' && game.stage !== 'results') parts.push({ message: 'lunarPreviewFrr',
+    values: { reserve, correction: mission.routes[lunarDesign(game).route].correctionKg } })
+  return { blocked: mass.margin < reserve, parts }
+}
+
 function pdr(game: Game): Review | null {
   if (!completed(game, 'prelim')) return null
-  const assembledAtLightEnd = lunarMass({ ...lunarDesign(game), mount: 'lightweight' }, lunarState(game).extraKg, true, lunarAllocation(game))
-  const margin = lunarFlightRevised(game) ? assembledAtLightEnd.margin : massBudget(game).margin
-  const returned: Copy = { message: 'lunarPropellantPdr', values: { margin, threshold: mission.reserveKg } }
+  const margin = lunarPdrMargin(game)
+  const current = massBudget(game).margin
+  const values = { margin, count: margin, current, threshold: mission.reserveKg }
+  const returned: Copy = { message: margin === current ? 'lunarPropellantPdr' : 'lunarPropellantPdrLight', values }
   return { issues: margin >= mission.reserveKg ? [] : [{ detail: returned }],
-    approve: { message: 'lunarPdrPass', values: { count: margin } }, return: returned }
+    approve: { message: margin === current ? 'lunarPdrPass' : 'lunarPdrPassLight', values }, return: returned }
 }
 
 function frr(game: Game): Review {

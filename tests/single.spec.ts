@@ -171,7 +171,7 @@ test('a legacy stretch save retains its target and design trade-offs', async ({ 
     await finishDelivery(page, 1)
     await expect(page.getByText('4-batch challenge met. You delivered 4 batches.')).toBeVisible()
     await expect(page.getByText(/Reinforced power added \$100,000/)).toBeVisible()
-    await button(page, 'Play again?').click()
+    await button(page, 'Replay this mission').click()
     await expect.poll(() => saved(page)).toMatchObject({ scienceGoal: 'stretch', week: 0 })
     expect((await saved(page)).seed).not.toBe(6)
   } finally {

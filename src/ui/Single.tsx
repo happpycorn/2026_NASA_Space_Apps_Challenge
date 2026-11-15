@@ -1,6 +1,7 @@
 import { orbitalCapacity, orbitalCarried, orbitalDegradedCapacity, orbitalLaunch, orbitalRisks, type OrbitalDesign } from '../missions/orbital-launch'
+import { completed } from '../missions/chapter'
 import { lunarMission, lunarPlanBatches } from '../missions/lunar-mission'
-import { lunarAllocation, lunarBudgetForecast, lunarCorrection, lunarDesign, lunarPlanCost, massBudget } from '../missions/lunar-rules'
+import { lunarAllocation, lunarBudgetForecast, lunarCorrection, lunarDesign, lunarMarginCopy, lunarPlanCost, massBudget } from '../missions/lunar-rules'
 import { orbitalCorrection, orbitalPlanCost, orbitalState } from '../missions/orbital-rules'
 import { commissionCanConfigure, commissionFor, commissionLimits, commissionPlan, commissionRepairs, commissions, type CommissionId } from '../missions/cubesat-commission'
 import { CommissionDeliveryFeedback, CommissionNote, CommissionOption, CommissionPlan, deliveryEstimate } from '../missions/cubesat-commission-ui'
@@ -578,9 +579,10 @@ function MissionRating({ game, mission, t }: Pick<Props, 'game' | 'mission' | 't
   const stars = criteria.filter(item => item.met).length
   return <section className="mission-rating" aria-label={t('ratingTitle')}>
     <strong>{t('ratingTitle')} · {'★'.repeat(stars)}{'☆'.repeat(criteria.length - stars)}</strong>
-    <ul>{criteria.map(item => <li key={item.id} className={item.met ? 'good' : undefined}>
-      {item.met ? '✓' : '·'} {t(item.id === 'ratingReserve' && game.missionId === lunarMission.id ? 'lunarRatingReserve' : item.id,
-        { percent: 10, target: reserveTarget })}
+    <ul>{criteria.map(item => <li key={item.id} className={item.met ? 'good' : 'unmet'}>
+      {item.met ? '✓' : '✗'} {t(item.met ? 'ratingMet' : 'ratingUnmet', {
+        criterion: t(item.id === 'ratingReserve' && game.missionId === lunarMission.id ? 'lunarRatingReserve' : item.id,
+          { percent: 10, target: reserveTarget }) })}
     </li>)}</ul>
   </section>
 }
@@ -644,7 +646,8 @@ function Results({ game, mission, progress, t, back, replay, open, studio = fals
           : evidenceStatus(current, t)}>
           <EvidenceReport mission={mission} evidence={evidence} t={t} outdated={!current} />
         </Disclosure> : <div className="receipt-line"><span>{t('report')}</span><small>{t('noEvidence')}</small></div>}
-        {flight ? <Disclosure label={t('delivery')} value={game.missionId === cubeSat.id ? batches(flight.batches) : mission.ui.flightSummary(flight, t)}>
+        {flight ? <Disclosure label={t('delivery')} value={game.missionId !== orbitalLaunch.id ? batches(flight.batches)
+          : flight.stop === 'ascent' ? mission.ui.flightSummary(flight, t) : t('storyConfirmation', { count: flight.confirmation ?? 0 })}>
           <mission.ui.Delivery flight={flight} t={t} />
           {flight.segments && <SegmentHistory mission={mission} steps={flight.segments} t={t} />}
         </Disclosure> : <div className="receipt-line"><span>{t('delivery')}</span><small>{t('noFlight')}</small></div>}
@@ -870,7 +873,7 @@ function LegacyWorkbench(props: Props) {
   const phase = phaseOf(game, stage)
   return <article className="single-mission">
     <div className="mission-heading">
-      <Heading eyebrow={t(mission.title)} title={t(game.returned ? 'returned' : stage)} />
+      <Heading eyebrow={t(mission.title)} title={t(game.returned ? 'returned' : stageTitle(game, stage))} />
       <Back t={t} onClick={back} />
     </div>
     <div className="mission-steps" aria-label={t('process')}>
@@ -1263,12 +1266,13 @@ function Studio({ game, mission, t, send, back, languageControls }: Props) {
   const skip = () => setMotion(current => ({ ...current, skipped: key }))
   const noAnimation = motion.paused || motion.skipped === key
   const workReport = job && studioWorkReport(job.task)
-  const report = workReport ?? studioReport(game, segment?.id, flightChoices[0]?.prompt, evidence?.auxPass === false || corrections.length > 0 && game.stage === 'design')
+  const report = workReport ?? studioReport(game, segment?.id, flightChoices[0]?.prompt, evidence?.auxPass === false || corrections.length > 0 && game.stage === 'design',
+    game.stage === 'design' && (planLimits.length > 0 || Boolean(commissionNumbers && (commissionNumbers.spareWeeks < 0 || commissionNumbers.spareCredits < 0))))
   const flightAlert = /^(risk:|card:(Eclipse|Weather|Lightning|Scrub))/.test(flightChoices[0]?.prompt ?? '')
     || flightBrief?.message === 'orbitalPassDegraded'
   const alert = Boolean(reviewBlocked) || sceneModel(mission.id, game).warning || report.message === 'studioAnomaly' || flightAlert
   const title = t(event?.title ?? (lunarLaunch && !readyToLaunch ? 'studioGroundChecks' : segment?.title)
-    ?? (game.returned ? 'returned' : game.stage))
+    ?? (game.returned ? 'returned' : stageTitle(game, game.stage)))
   const objective = client ? t(game.commission === 'bay' ? 'studioBayBrief' : 'studioRiverBrief', { count: client.required })
     : orbital ? t('studioOrbitalBrief', { payload: orbitalLaunch.testPayloadKg, units: orbitalLaunch.confirmationUnits })
     : t('studioLunarBrief', { count: lunarMission.minimumBatches })
@@ -1516,7 +1520,12 @@ function studioWorkReport(task: string): { speaker: Speaker; prop: Prop; message
   return { speaker, prop: typeof art === 'string' ? art : art.prop, message: 'studioWorkingOn' }
 }
 
-function studioReport(game: Game, segment?: string, prompt?: string, failedCamera = false): {
+// Orbital and lunar work on the preliminary design until PDR passes. Only then does the stage become detailed design.
+function stageTitle(game: Game, stage: Message): Message {
+  return stage === 'design' && game.gate === 'PDR' && game.missionId !== cubeSat.id ? 'designPrelim' : stage
+}
+
+function studioReport(game: Game, segment?: string, prompt?: string, failedCamera = false, designBlocked = false): {
   speaker: Speaker; prop: Prop; message: Message
 } {
   if (game.event) {
@@ -1539,8 +1548,9 @@ function studioReport(game: Game, segment?: string, prompt?: string, failedCamer
   const orbital = game.missionId === orbitalLaunch.id
   const tasks: Record<Game['stage'], [Prop, Message]> = {
     feasibility: [game.commission ?? (orbital ? 'scale' : 'contract'), 'studioFeasibility'],
-    design: ['data', lunar ? 'studioLunarDesign' : 'studioDesign'],
-    build: [lunar ? 'lander' : orbital ? 'upperStage' : 'box', lunar ? 'studioLunarBuild' : orbital ? 'studioOrbitalBuild' : 'studioBuild'],
+    design: ['data', lunar ? 'studioLunarDesign' : designBlocked ? 'studioDesignBlocked' : 'studioDesign'],
+    build: [lunar ? 'lander' : orbital ? 'upperStage' : 'box', lunar ? 'studioLunarBuild' : !orbital ? 'studioBuild'
+      : completed(game, 'buildStage') ? 'studioOrbitalBuildStageDone' : completed(game, 'buildAvionics') ? 'studioOrbitalBuildAvionicsDone' : 'studioOrbitalBuild'],
     integration: ['wrench', game.evidence ? 'studioRetest' : lunar ? 'studioLunarTest' : orbital ? 'studioOrbitalTest' : 'studioTest'],
     review: ['scale', lunar ? 'studioLunarReview' : 'studioRelease'], flight: ['signal', 'studioFlight'], results: ['data', 'studioStartReport'],
   }
@@ -1576,12 +1586,12 @@ function DesignReadings({ game, t, compare = false }: { game: Game; t: Translate
         degraded: orbitalDegradedCapacity(design, state) })} · {t('credits', { count: orbitalPlanCost(game) })}</small>
     </span>
   }
-  const mass = massBudget(game)
+  const margin = lunarMarginCopy(game)
   const design = lunarDesign(game)
   const route = lunarMission.routes[design.route]
   return <span className="studio-readings">
-    <span className={mass.margin < lunarMission.reserveKg ? 'studio-reading-main studio-blocker' : 'studio-reading-main'}>
-      {t('lunarPreview', { margin: mass.margin, reserve: lunarMission.reserveKg, dry: mass.dry })}
+    <span className={margin.blocked ? 'studio-reading-main studio-blocker' : 'studio-reading-main'}>
+      {margin.parts.map(part => t(part.message, part.values)).join(' ')}
     </span>
     <small>{t('lunarRouteBudget', { correction: route.correctionKg, propellant: route.propellantKg,
       week: game.deadline - route.leadWeeks, allocation: lunarAllocation(game) })}</small>

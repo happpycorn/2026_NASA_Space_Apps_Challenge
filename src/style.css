@@ -485,6 +485,7 @@ blockquote { margin-bottom: 19px; border-left: 2px solid var(--line); padding: 3
 .risk-panel small { color: var(--muted); font-size: .8rem; line-height: 1.5; overflow-wrap: anywhere; }
 .risk-panel p { margin: 0; }
 .risk-odds { font: .82rem/1.5 var(--mono); }
+.risk-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; }
 .risk-item { display: grid; gap: 5px; padding-top: 9px; border-top: 1px solid var(--line); }
 .risk-item .button { justify-self: start; text-align: start; white-space: normal; }
 
@@ -501,6 +502,7 @@ blockquote { margin-bottom: 19px; border-left: 2px solid var(--line); padding: 3
 .mission-rating { display: grid; gap: 4px; margin: 14px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 3px; }
 .mission-rating strong { font-family: var(--display); font-size: 1.05rem; }
 .mission-rating ul { margin: 0; padding-left: 18px; }
+.mission-rating .unmet { color: var(--muted); }
 .glossary dt { font-weight: 680; margin-top: 8px; }
 .glossary dd { color: var(--muted); }
 

@@ -205,7 +205,7 @@ export function StudioScene({ missionId, game, t, sequence, speaker, prop, brief
     data-reporter={speaker} data-warning={warning} data-auxiliary={model.auxiliary} data-result={result}
     data-preview-group={meetingPreview?.group} data-preview-option={meetingPreview?.option} aria-label={thumbnail ? undefined : label}>
     <canvas width={320} height={140} ref={canvas} aria-hidden="true" />
-    {!thumbnail && <figcaption><span>{label}{warning && <span className="scene-warning">{t('studioWarning')}</span>}</span>{animationControl}</figcaption>}
+    {!thumbnail && <figcaption><span>{label}{warning && !result && <span className="scene-warning">{t('studioWarning')}</span>}</span>{animationControl}</figcaption>}
   </figure>
 }
 

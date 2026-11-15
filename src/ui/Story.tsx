@@ -103,6 +103,7 @@ export function Portfolio({ progress, t, expanded }: { progress: Progress; t: Tr
       const earned = (record?.records ?? []).filter(item => Object.hasOwn(earnedLabels, item))
       const outcome = record?.stretch ? 'missionStretchDone' : record?.minimum ? 'missionMinimumDone'
         : report?.status === 'stopped' ? 'noFlight' : record ? 'storyRecordShort' : 'storyRecordPending'
+      if (!record) return <div className="receipt-line" key={id}><span>{t(title)}</span><small>{t(outcome)}</small></div>
       return <Disclosure key={id} label={t(title)} value={t(outcome)}>
         {report ? <>
           {report.commission && <p>{t(commissions[report.commission].name)}</p>}
@@ -118,8 +119,7 @@ export function Portfolio({ progress, t, expanded }: { progress: Progress; t: Tr
             {report.accepted > 0 && <div><dt>{t('storyAcceptedRisks')}</dt><dd>{report.accepted}</dd></div>}
           </dl>
           <Disclosure label={t('configuration')}><DesignSummary mission={mission} design={report.design} t={t} /></Disclosure>
-        </> : record && <p>{t('storyOlderRecord')}</p>}
-        {!record && <p>{t('storyRecordPending')}</p>}
+        </> : <p>{t('storyOlderRecord')}</p>}
         {earned.length > 0 && <ul>{earned.map(item => <li key={item}>{t(earnedLabels[item])}</li>)}</ul>}
       </Disclosure>
     })}
