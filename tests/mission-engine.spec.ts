@@ -274,7 +274,7 @@ test('three chapters carry earned records, resume paid work, and start a new lun
   await expect(page.getByText(/月面科學組收到光譜/)).toBeVisible()
   await expect(page.locator('main')).not.toContainText(/\{\w+\}/)
   await expect.poll(async () => (await progress()).missions['lunar-mission'].minimum).toBe(true)
-  await button('要不要再玩一次？').click()
+  await button('重玩這個任務').click()
   await expect.poll(() => saved(page)).toMatchObject({ missionId: 'lunar-mission', week: 0, flight: null })
   expect((await saved(page)).seed).not.toBe(1)
   await chooseLanguage(page, 'EN')
