@@ -110,13 +110,11 @@ function Lobby({ t, game, progress, open, resume, team, firstStart }: {
       </ol>
     </section>
     <div id="mission-portfolio"><Portfolio progress={progress} t={t} expanded={completed} /></div>
-    <div className="lobby-links">
-      {multiplayerAvailable ? <button className="lobby-team" onClick={team}>
+    {multiplayerAvailable && <div className="lobby-links">
+      <button className="lobby-team" onClick={team}>
         <span>{t('multiplayer')}</span><small>{t('teamSize')}</small><ArrowRight size={17} aria-hidden />
-      </button> : <div className="lobby-team lobby-team-offline">
-        <span>{t('multiplayer')}</span><small>{t('roomServiceOffline')}</small>
-      </div>}
-    </div>
+      </button>
+    </div>}
   </>
 }
 

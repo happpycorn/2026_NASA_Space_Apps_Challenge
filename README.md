@@ -1,6 +1,6 @@
 # FINAL ORBIT／最後的軌道
 
-NASA Space Apps Challenge 的回合制太空任務管理遊戲。玩家帶領 Astra Dynamics 從發射事故後重建信譽，在工期、預算和工程限制下設計、驗證、放行並交付。單人主線從立方衛星、入軌火箭走到登月，累積聲望、合作資格和任務履歷。多人模式提供 2–4 人的立方衛星整合審查。
+NASA Space Apps Challenge 的回合制太空任務管理遊戲。玩家帶領 Astra Dynamics 從發射事故後重建信譽，在工期、預算和工程限制下設計、驗證、放行並交付。單人主線從立方衛星、入軌火箭走到登月，累積聲望、合作資格和任務履歷。
 
 ## 快速啟動
 
@@ -15,10 +15,9 @@ npm run dev
 
 ## 專案文件
 
-- [開發與試玩指南](docs/development.md)｜單人試玩路線、多人模擬器、測試、部署與文案交接。
+- [開發與試玩指南](docs/development.md)｜試玩路線、測試、部署與文案交接。
 - [遊戲設計草案](docs/game-design.md)｜架構、回合流程、審查階段與難度規劃。
 - [遊戲改版計畫與驗收規格](docs/gameplay-revision-plan.md)｜首局引導、決策回饋與三章驗收路線。
-- [多人合作草案](docs/multiplayer.md)｜部門角色、提案與整合審查。
 - [NASA 資源與玩法調整提案](docs/nasa-mission-design-notes.md)｜官方資源如何對應遊戲設計。
 - [挑戰要求與提交規則整理](docs/challenge-requirements.md)｜題目、提交規則與評分標準的繁中筆記。
 

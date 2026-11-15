@@ -56,8 +56,8 @@ test('the lobby defaults to English and remembers deliberate language changes', 
     await page.goto('/')
     await expect(button(page, 'Begin game')).toBeVisible()
     if (process.env.PLAYWRIGHT_EMULATORS !== 'true') {
-      await expect(page.getByText('Room service offline')).toBeVisible()
-      await expect(button(page, 'Team review')).toHaveCount(0)
+      await expect(page.getByText(/Team review|Room service offline/)).toHaveCount(0)
+      await page.evaluate(() => localStorage.setItem('space-mission.active-room', 'ABCDEFGH'))
     }
     await page.evaluate(() => localStorage.setItem('space-mission.language', 'zh-TW'))
     await page.reload()
@@ -66,6 +66,10 @@ test('the lobby defaults to English and remembers deliberate language changes', 
     await button(page, '繁中').click()
     await page.reload()
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh-TW')
+    if (process.env.PLAYWRIGHT_EMULATORS !== 'true') {
+      await expect(button(page, '開始遊戲')).toBeVisible()
+      await expect(page.getByText(/多人審查|房間服務未連線/)).toHaveCount(0)
+    }
 
     await button(page, 'EN').click()
     await page.reload()

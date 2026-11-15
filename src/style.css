@@ -65,7 +65,6 @@ svg { flex: none; }
 .lobby-team { width: 100%; min-height: 47px; display: flex; align-items: center; gap: 12px; padding: 8px 0; background: none; color: var(--accent); border: 0; border-bottom: 1px solid var(--line); text-align: start; font-weight: 680; }
 .lobby-team small { margin-left: auto; }
 .lobby-team:hover, .disclosure summary:hover { color: #0e6492; }
-.lobby-team-offline, .lobby-team-offline:hover { color: var(--muted); }
 .room-code-display { flex-wrap: wrap; }
 .room-code-display code { user-select: text; }
 .lobby .button[href] { text-decoration: none; }
